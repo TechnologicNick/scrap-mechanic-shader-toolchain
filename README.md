@@ -99,6 +99,11 @@ preprocessor behavior still agrees with the manifest.
 
 ### Readable semantic lifts
 
+All 80 recovered modules (4,141 shader variants) now have semantic HLSL with
+reflection-compatible runtime interfaces and differential GPU coverage. See
+[the semantic coverage audit](docs/SEMANTIC-COVERAGE.md) for the validation
+layers, reproducible commands, reference hashes, and fuzz-domain limitations.
+
 The `hlsl/` modules remain the mechanical, lossless reverse-engineering layer.
 Recognized shaders additionally receive a hand-readable implementation under
 `semantic/`. This separates proven cache recovery from higher-level inference:
