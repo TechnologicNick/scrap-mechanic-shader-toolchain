@@ -125,8 +125,7 @@ def _invoke_harness(
     relative_tolerance: float,
     texture_slots: list[int],
     samplers: list[dict[str, Any]],
-    constant_buffer_slot: int,
-    constant_profile: str,
+    constant_buffers: list[dict[str, Any]],
     output_kind: str,
     failure_dir: Path | None,
     warp: bool,
@@ -157,10 +156,11 @@ def _invoke_harness(
         ",".join(
             f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
         ),
-        "--constant-buffer-slot",
-        str(constant_buffer_slot),
-        "--constant-profile",
-        constant_profile,
+        "--constant-buffers",
+        ",".join(
+            f"{binding['slot']}:{binding['profile']}"
+            for binding in constant_buffers
+        ),
         "--output",
         output_kind,
     ]
@@ -224,15 +224,31 @@ def fuzz_semantic_shader(
         {"slot": int(sampler["slot"]), "filter": str(sampler["filter"])}
         for sampler in samplers
     ]
-    constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
-    constant_profile = str(execution.get("constant_profile", "projection"))
+    constant_buffers = execution.get(
+        "constant_buffers",
+        [
+            {
+                "slot": int(execution.get("constant_buffer_slot", 5)),
+                "profile": str(
+                    execution.get("constant_profile", "projection")
+                ),
+            }
+        ],
+    )
+    constant_buffers = [
+        {"slot": int(binding["slot"]), "profile": str(binding["profile"])}
+        for binding in constant_buffers
+    ]
     output_kind = str(execution.get("output", "color"))
     if any(sampler["filter"] not in ("point", "linear") for sampler in samplers):
         raise ToolchainError("unsupported sampler filter")
     if output_kind not in ("color", "depth"):
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
-    if constant_profile not in ("projection", "random", "hdr", "rect"):
-        raise ToolchainError(f"unsupported constant profile: {constant_profile}")
+    if any(
+        binding["profile"] not in ("projection", "random", "hdr", "rect")
+        for binding in constant_buffers
+    ):
+        raise ToolchainError("unsupported constant-buffer profile")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
     baseline_path = corpus / pixel["dxbc_path"]
@@ -273,8 +289,7 @@ def fuzz_semantic_shader(
             relative_tolerance=0.0,
             texture_slots=texture_slots,
             samplers=samplers,
-            constant_buffer_slot=constant_buffer_slot,
-            constant_profile=constant_profile,
+            constant_buffers=constant_buffers,
             output_kind=output_kind,
             failure_dir=None,
             warp=warp,
@@ -294,8 +309,7 @@ def fuzz_semantic_shader(
             relative_tolerance=relative_tolerance,
             texture_slots=texture_slots,
             samplers=samplers,
-            constant_buffer_slot=constant_buffer_slot,
-            constant_profile=constant_profile,
+            constant_buffers=constant_buffers,
             output_kind=output_kind,
             failure_dir=failure_dir,
             warp=warp,
@@ -309,8 +323,7 @@ def fuzz_semantic_shader(
         "semantic_execution": {
             "texture_slots": texture_slots,
             "samplers": samplers,
-            "constant_buffer_slot": constant_buffer_slot,
-            "constant_profile": constant_profile,
+            "constant_buffers": constant_buffers,
             "output": output_kind,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),

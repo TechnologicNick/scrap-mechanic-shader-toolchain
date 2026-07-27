@@ -21,6 +21,18 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
+enum class ConstantProfile {
+    projection,
+    random,
+    hdr,
+    rect,
+};
+
+struct ConstantBinding {
+    uint32_t slot;
+    ConstantProfile profile;
+};
+
 struct Options {
     std::filesystem::path vertex;
     std::filesystem::path baseline;
@@ -34,10 +46,8 @@ struct Options {
     double relative_tolerance = 0.0;
     std::vector<uint32_t> texture_slots = {0};
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
-    uint32_t constant_buffer_slot = 5;
-    bool random_constants = false;
-    bool hdr_constants = false;
-    bool rect_constants = false;
+    std::vector<ConstantBinding> constant_buffers = {
+        {5, ConstantProfile::projection}};
     bool depth_output = false;
     bool warp = false;
 };
@@ -116,6 +126,25 @@ double parse_double(const std::string& text) {
     return value;
 }
 
+ConstantProfile parse_constant_profile(const std::string& profile) {
+    if (profile == "projection") return ConstantProfile::projection;
+    if (profile == "random") return ConstantProfile::random;
+    if (profile == "hdr") return ConstantProfile::hdr;
+    if (profile == "rect") return ConstantProfile::rect;
+    throw std::runtime_error(
+        "constant profile must be projection, random, hdr, or rect");
+}
+
+const char* constant_profile_name(ConstantProfile profile) {
+    switch (profile) {
+    case ConstantProfile::projection: return "projection";
+    case ConstantProfile::random: return "random";
+    case ConstantProfile::hdr: return "hdr";
+    case ConstantProfile::rect: return "rect";
+    }
+    return "unknown";
+}
+
 Options parse_options(int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -180,18 +209,27 @@ Options parse_options(int argc, char** argv) {
                 options.samplers.emplace_back(slot, filter == "point");
             }
         } else if (name == "--constant-buffer-slot") {
-            options.constant_buffer_slot = static_cast<uint32_t>(parse_u64(value()));
+            options.constant_buffers.front().slot =
+                static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--constant-profile") {
-            const std::string profile = value();
-            if (profile == "random") {
-                options.random_constants = true;
-            } else if (profile == "hdr") {
-                options.hdr_constants = true;
-            } else if (profile == "rect") {
-                options.rect_constants = true;
-            } else if (profile != "projection") {
-                throw std::runtime_error(
-                    "constant profile must be projection, random, hdr, or rect");
+            options.constant_buffers.front().profile =
+                parse_constant_profile(value());
+        } else if (name == "--constant-buffers") {
+            options.constant_buffers.clear();
+            std::stringstream bindings(value());
+            std::string binding;
+            while (std::getline(bindings, binding, ',')) {
+                const size_t separator = binding.find(':');
+                if (separator == std::string::npos) {
+                    throw std::runtime_error(
+                        "constant buffers must use slot:profile");
+                }
+                options.constant_buffers.push_back(
+                    {
+                        static_cast<uint32_t>(parse_u64(
+                            binding.substr(0, separator))),
+                        parse_constant_profile(binding.substr(separator + 1)),
+                    });
             }
         } else if (name == "--filter") {
             const std::string filter = value();
@@ -239,7 +277,13 @@ Options parse_options(int argc, char** argv) {
             [](const auto& sampler) {
                 return sampler.first >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
             })
-        || options.constant_buffer_slot >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) {
+        || std::any_of(
+            options.constant_buffers.begin(),
+            options.constant_buffers.end(),
+            [](const ConstantBinding& binding) {
+                return binding.slot
+                    >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+            })) {
         throw std::runtime_error("resource binding slot is out of range");
     }
     return options;
@@ -316,13 +360,23 @@ public:
     }
 
     void update_constants(uint32_t case_index) {
-        if (!options_.random_constants
-            && !options_.hdr_constants
-            && !options_.rect_constants) {
-            return;
+        for (size_t index = 0; index < options_.constant_buffers.size(); ++index) {
+            const auto constants = constant_values(
+                options_.constant_buffers[index].profile, case_index);
+            context_->UpdateSubresource(
+                constant_buffers_[index].Get(),
+                0,
+                nullptr,
+                constants.data(),
+                0,
+                0);
         }
+    }
+
+    std::array<float, 62 * 4> constant_values(
+        ConstantProfile profile, uint32_t case_index) const {
         std::array<float, 62 * 4> constants{};
-        if (options_.rect_constants) {
+        if (profile == ConstantProfile::rect) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
             const float extent = static_cast<float>(
@@ -331,7 +385,7 @@ public:
             constants[1] = constants[0];
             constants[2] = case_index == 1 ? 1.0f : extent - constants[0];
             constants[3] = constants[2];
-        } else if (options_.hdr_constants) {
+        } else if (profile == ConstantProfile::hdr) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
             constants[3 * 4 + 3] = case_index == 0
@@ -343,17 +397,37 @@ public:
             constants[4 * 4 + 3] = case_index == 0
                 ? 1.0f
                 : 0.5f + random.unit() * 1.5f;
-        } else if (case_index == 1) {
+        } else if (profile == ConstantProfile::random && case_index == 1) {
             constants.fill(1.0f);
-        } else if (case_index > 1) {
+        } else if (profile == ConstantProfile::random && case_index > 1) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
             for (float& value : constants) {
                 value = random.unit() * 4.0f - 2.0f;
             }
+        } else if (profile == ConstantProfile::projection) {
+            constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
+            constants[51 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
+            constants[52 * 4] = 1.0f / static_cast<float>(options_.width);
+            constants[52 * 4 + 1] = 1.0f / static_cast<float>(options_.height);
+            constants[52 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
+            constants[52 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
+            constants[53 * 4] = 1.0f;
+            constants[53 * 4 + 1] = 1.0f;
+            constants[54 * 4] =
+                1.0f - 0.5f / static_cast<float>(options_.width);
+            constants[54 * 4 + 1] =
+                1.0f - 0.5f / static_cast<float>(options_.height);
+            constants[54 * 4 + 2] = constants[54 * 4];
+            constants[54 * 4 + 3] = constants[54 * 4 + 1];
+            constants[55 * 4] = constants[54 * 4];
+            constants[55 * 4 + 1] = constants[54 * 4 + 1];
+            constants[56 * 4] = 1.0f;
+            constants[56 * 4 + 1] = 1.0f;
+            constants[60 * 4] = 1.0f;
+            constants[60 * 4 + 1] = 1.0f;
         }
-        context_->UpdateSubresource(
-            constant_buffer_.Get(), 0, nullptr, constants.data(), 0, 0);
+        return constants;
     }
 
     std::vector<float> render(ID3D11PixelShader* shader) {
@@ -496,31 +570,17 @@ private:
         buffer_description.ByteWidth = 62 * 16;
         buffer_description.Usage = D3D11_USAGE_DEFAULT;
         buffer_description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        std::array<float, 62 * 4> constants{};
-        constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
-        constants[51 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
-        constants[52 * 4] = 1.0f / static_cast<float>(options_.width);
-        constants[52 * 4 + 1] = 1.0f / static_cast<float>(options_.height);
-        constants[52 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
-        constants[52 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
-        constants[53 * 4] = 1.0f;
-        constants[53 * 4 + 1] = 1.0f;
-        constants[54 * 4] = 1.0f - 0.5f / static_cast<float>(options_.width);
-        constants[54 * 4 + 1] = 1.0f - 0.5f / static_cast<float>(options_.height);
-        constants[54 * 4 + 2] = constants[54 * 4];
-        constants[54 * 4 + 3] = constants[54 * 4 + 1];
-        constants[55 * 4] = constants[54 * 4];
-        constants[55 * 4 + 1] = constants[54 * 4 + 1];
-        constants[56 * 4] = 1.0f;
-        constants[56 * 4 + 1] = 1.0f;
-        constants[60 * 4] = 1.0f;
-        constants[60 * 4 + 1] = 1.0f;
-        D3D11_SUBRESOURCE_DATA buffer_data{};
-        buffer_data.pSysMem = constants.data();
-        check(
-            device_->CreateBuffer(
-                &buffer_description, &buffer_data, &constant_buffer_),
-            "CreateBuffer");
+        for (const ConstantBinding& binding : options_.constant_buffers) {
+            const auto constants = constant_values(binding.profile, 0);
+            D3D11_SUBRESOURCE_DATA buffer_data{};
+            buffer_data.pSysMem = constants.data();
+            ComPtr<ID3D11Buffer> buffer;
+            check(
+                device_->CreateBuffer(
+                    &buffer_description, &buffer_data, &buffer),
+                "CreateBuffer");
+            constant_buffers_.push_back(std::move(buffer));
+        }
 
         for (const auto& [slot, point] : options_.samplers) {
             static_cast<void>(slot);
@@ -563,14 +623,16 @@ private:
         viewport.Width = static_cast<float>(options_.width);
         viewport.Height = static_cast<float>(options_.height);
         viewport.MaxDepth = 1.0f;
-        ID3D11Buffer* constant_buffer = constant_buffer_.Get();
         ID3D11RenderTargetView* target = render_target_view_.Get();
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
-        context_->VSSetConstantBuffers(
-            options_.constant_buffer_slot, 1, &constant_buffer);
-        context_->PSSetConstantBuffers(
-            options_.constant_buffer_slot, 1, &constant_buffer);
+        for (size_t index = 0; index < options_.constant_buffers.size(); ++index) {
+            ID3D11Buffer* constant_buffer = constant_buffers_[index].Get();
+            context_->VSSetConstantBuffers(
+                options_.constant_buffers[index].slot, 1, &constant_buffer);
+            context_->PSSetConstantBuffers(
+                options_.constant_buffers[index].slot, 1, &constant_buffer);
+        }
         for (size_t index = 0; index < options_.texture_slots.size(); ++index) {
             ID3D11ShaderResourceView* input_view = input_views_[index].Get();
             context_->PSSetShaderResources(
@@ -606,7 +668,7 @@ private:
     std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
     ComPtr<ID3D11RenderTargetView> render_target_view_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
-    ComPtr<ID3D11Buffer> constant_buffer_;
+    std::vector<ComPtr<ID3D11Buffer>> constant_buffers_;
     std::vector<ComPtr<ID3D11SamplerState>> samplers_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
     ComPtr<ID3D11DepthStencilState> depth_state_;
@@ -933,15 +995,18 @@ int main(int argc, char** argv) {
                       << "\"}";
         }
         std::cout << "],\n"
-                  << "  \"constant_buffer_slot\": "
-                  << options.constant_buffer_slot << ",\n"
-                  << "  \"constant_profile\": \""
-                  << (options.random_constants
-                        ? "random"
-                        : (options.hdr_constants
-                            ? "hdr"
-                            : (options.rect_constants ? "rect" : "projection")))
-                  << "\",\n"
+                  << "  \"constant_buffers\": [";
+        for (size_t index = 0; index < options.constant_buffers.size(); ++index) {
+            if (index != 0) {
+                std::cout << ", ";
+            }
+            std::cout << "{\"slot\": " << options.constant_buffers[index].slot
+                      << ", \"profile\": \""
+                      << constant_profile_name(
+                            options.constant_buffers[index].profile)
+                      << "\"}";
+        }
+        std::cout << "],\n"
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
