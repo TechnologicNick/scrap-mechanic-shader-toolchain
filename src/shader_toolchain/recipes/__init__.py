@@ -12,6 +12,7 @@ from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
+from .save_paused import apply_save_paused_recipe
 
 
 RECIPES = (
@@ -27,6 +28,7 @@ RECIPES = (
     apply_bloom_upres_recipe,
     apply_post_downsample_recipe,
     apply_bloom_last_upres_recipe,
+    apply_save_paused_recipe,
 )
 
 
