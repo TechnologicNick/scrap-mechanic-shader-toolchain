@@ -119,12 +119,28 @@ the raw lift remains available for instruction-level investigation, while the
 semantic version uses meaningful types, variable names, constants, and control
 flow.
 
+Semantic coverage and structural readability are tracked separately. Some
+large modules still retain instruction-ordered decompiler blocks inside a
+documented semantic recipe; those blocks compile, reflect, and fuzz correctly,
+but remain candidates for deeper lifting. A fully structural lift removes the
+anonymous register program, factors shared ABI declarations into includes, and
+expresses the recovered algorithm as named data and helpers.
+
 The first recipe recognizes both stages of `post_fxaa`. Its pixel shader is
 expressed as the compact FXAA algorithm: a five-sample luminance neighborhood,
 edge direction and span reduction, inner/outer filtering, and a luminance-range
 choice. Its vertex shader names the full-screen triangle and the center and
 north-west sample coordinates. The recovered `CB_PROJECTION` layout is kept in
 a shared include.
+
+`post_godrays` is another fully structural lift. Its two pixel variants share
+view-ray reconstruction, cascade transformation and comparison filtering,
+temporal reprojection, and HDR encoding. `PS_UNDER_WATER` adds the recovered
+water-plane and caustic integration without duplicating the shader. Its large
+projection, per-frame, and HDR buffers are retained exactly in generated ABI
+includes. The GPU harness uses a dedicated `godrays` constant profile to drive
+inside/outside cascade samples, water intersections and rejections, shadow
+filtering, and temporal history.
 
 Semantic recipes are not accepted merely because they compile. Reconstruction
 compiles each generated implementation and reflects it against the recovered

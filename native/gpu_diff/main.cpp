@@ -39,6 +39,7 @@ enum class ConstantProfile {
     cloud,
     cluster_culling,
     hzb,
+    godrays,
 };
 
 struct ConstantBinding {
@@ -223,6 +224,7 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "cloud") return ConstantProfile::cloud;
     if (profile == "cluster-culling") return ConstantProfile::cluster_culling;
     if (profile == "hzb") return ConstantProfile::hzb;
+    if (profile == "godrays") return ConstantProfile::godrays;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
 }
@@ -251,6 +253,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::fsr_rcas: return "fsr-rcas";
     case ConstantProfile::index: return "index";
     case ConstantProfile::auto_hdr: return "auto-hdr";
+    case ConstantProfile::godrays: return "godrays";
     case ConstantProfile::cloud: return "cloud";
     case ConstantProfile::cluster_culling: return "cluster-culling";
     case ConstantProfile::hzb: return "hzb";
@@ -1005,6 +1008,55 @@ public:
                 rotation[5] = 1.0f;
                 rotation[10] = 1.0f;
             }
+        } else if (profile == ConstantProfile::godrays) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            const float jitter = random.unit();
+
+            // Directional light in view space and toward the water surface.
+            constants[1 * 4 + 0] = 0.1f + 0.2f * jitter;
+            constants[1 * 4 + 1] = 0.15f;
+            constants[1 * 4 + 2] = 0.95f;
+            constants[2 * 4 + 0] = 0.08f;
+            constants[2 * 4 + 1] = -0.06f;
+            constants[2 * 4 + 2] = case_index % 4 == 3 ? -0.5f : 1.0f;
+            constants[3 * 4 + 0] = 0.85f;
+            constants[3 * 4 + 1] = 0.72f;
+            constants[3 * 4 + 2] = 0.55f;
+            constants[3 * 4 + 3] = 0.75f + jitter;
+            constants[8 * 4 + 3] = 0.1f + 0.6f * random.unit();
+
+            // Water-plane and caustic controls. Alternating the surface makes
+            // the underwater variant enter both accepted and rejected paths.
+            constants[11 * 4 + 3] = case_index % 4 == 2 ? -2.0f : 2.0f;
+            constants[12 * 4 + 2] = 2.0f + 6.0f * random.unit();
+            constants[13 * 4 + 0] = random.unit();
+            constants[13 * 4 + 1] = random.unit();
+
+            const float cascade_size = 32.0f + 96.0f * random.unit();
+            constants[14 * 4 + 0] = cascade_size;
+            constants[14 * 4 + 1] = cascade_size;
+            constants[14 * 4 + 2] = 1.0f / cascade_size;
+            constants[14 * 4 + 3] = 1.0f / cascade_size;
+
+            // Cascade 1 maps the camera-centered march into the unit cube.
+            // Periodic translation outside the cube explicitly tests reject.
+            float* cascade = constants.data() + 19 * 4;
+            const float scale = 0.02f + 0.08f * random.unit();
+            cascade[0] = scale;
+            cascade[5] = scale;
+            cascade[10] = scale;
+            const float center = case_index % 5 == 4 ? 1.75f : 0.5f;
+            cascade[12] = center;
+            cascade[13] = center;
+            cascade[14] = center;
+            cascade[15] = 1.0f;
+
+            constants[45 * 4 + 0] = 0.9f;
+            constants[45 * 4 + 1] = 0.78f;
+            constants[45 * 4 + 2] = 0.62f;
+            constants[45 * 4 + 3] = 0.35f + 0.6f * random.unit();
+            constants[46 * 4 + 0] = 0.5f + random.unit();
         } else if (profile == ConstantProfile::random && case_index == 1) {
             constants.fill(1.0f);
         } else if (profile == ConstantProfile::random && case_index > 1) {

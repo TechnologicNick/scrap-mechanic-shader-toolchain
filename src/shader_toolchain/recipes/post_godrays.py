@@ -1,34 +1,15 @@
-"""Recognize and validate the two god-ray integration modes."""
+"""Recognize and emit the two readable god-ray integration modes."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from ..hlsl import module_variants
-from .common import emit_validated_module
-
-
-SEMANTIC_PHASE_MAP = """
-/*
-Semantic phase map
-------------------
-1. Reconstruct a normalized view ray from HZB depth and transform it to world.
-2. March 42 fixed-distance samples from the camera through the visible volume.
-3. Transform each sample into cascade 1 and evaluate a manually filtered 7x7
-   comparison-shadow footprint.  Accumulate only samples inside the cascade.
-4. Underwater mode intersects the ray with the water plane and modulates each
-   accepted shadow sample with two scrolling water-normal/caustic frequencies.
-5. Divide accumulated visibility by the accepted-sample count (minimum 10).
-6. Reproject the final world sample into the previous frame, then blend the
-   temporal and volatility histories with the new integration result.
-7. Shape the light-facing term and map the configured god-ray/light color
-   through the current HDR power/base/range before writing color and history.
-
-The executable block below remains instruction-ordered because changing FMA
-attachment inside the PCF and temporal reductions changes observable output.
-*/
-"""
+from .common import (
+    asset,
+    emit_validated_module,
+    ensure_recovered_cbuffer_include,
+)
 
 
 def apply_post_godrays_recipe(
@@ -40,15 +21,27 @@ def apply_post_godrays_recipe(
     shaders = [record for record in records if record["source_name"] == "post_godrays"]
     if len(shaders) != 2 or any(shader["stage"] != "pixel" for shader in shaders):
         return None
-    definitions = {shader["selector"]: shader["defines"] for shader in shaders}
-    expanded = module_variants(
-        (staging / "hlsl" / "post_godrays.hlsl").read_text(encoding="utf-8"),
-        definitions,
+    ensure_recovered_cbuffer_include(
+        staging, "post_godrays", "CB_PROJECTION",
+        "post_godrays_projection_abi.hlsl",
     )
+    ensure_recovered_cbuffer_include(
+        staging, "post_godrays", "CB_PERFRAME",
+        "post_godrays_perframe_abi.hlsl",
+    )
+    ensure_recovered_cbuffer_include(
+        staging, "post_godrays", "cb_hdr_settings",
+        "post_godrays_hdr_abi.hlsl",
+    )
+    body = asset("post_godrays_pixel.hlsl")
     bodies = {
         shader["selector"]: (
-            SEMANTIC_PHASE_MAP
-            + expanded[shader["selector"]]
+            (
+                "#define PS_UNDER_WATER 1\n"
+                if "PS_UNDER_WATER" in shader["defines"]
+                else ""
+            )
+            + body
         )
         for shader in shaders
     }
@@ -73,14 +66,16 @@ def apply_post_godrays_recipe(
             "constant_buffers": [
                 {"slot": 5, "profile": "projection"},
                 {"slot": 9, "profile": "hdr"},
-                {"slot": 12, "profile": "random"},
+                {"slot": 12, "profile": "godrays"},
             ],
             "output": "color",
             "output_components": 4,
             "output_targets": 2,
+            # Named helpers preserve the recovered operation order, but the
+            # compiler can attach a handful of multiply-adds differently.
+            "absolute_tolerance": 1.0e-5,
+            "ulp_tolerance": 16,
         }
-        if not underwater:
-            executions[shader["selector"]]["ulp_tolerance"] = 1
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_godrays", bodies=bodies, executions=executions,

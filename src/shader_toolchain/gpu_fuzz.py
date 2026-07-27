@@ -1098,7 +1098,7 @@ def fuzz_semantic_shader(
             "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
             "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr",
             "cloud", "cluster-culling",
-            "hzb",
+            "hzb", "godrays",
         )
         for binding in constant_buffers
     ):
