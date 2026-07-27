@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -24,6 +24,28 @@ The permutation bodies retain instruction ordering for packed cluster masks,
 shadow comparisons, cookie transforms and quality-dependent BRDF contraction.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "gbufferAddressState", 1: "surfaceMaterialState",
+    2: "normalDecodeState", 3: "viewPositionState",
+    4: "clusterMaskState", 5: "lightIteratorState",
+    6: "lightGeometryState", 7: "lightDirectionState",
+    8: "distanceAttenuationState", 9: "coneAttenuationState",
+    10: "cookieProjectionState", 11: "cookieSampleState",
+    12: "cascadeSelectionState", 13: "shadowProjectionState",
+    14: "shadowGatherStateA", 15: "shadowGatherStateB",
+    16: "shadowFilterState", 17: "brdfDiffuseState",
+    18: "brdfSpecularState", 19: "anisotropyState",
+    20: "subsurfaceState", 21: "ambientOcclusionState",
+    22: "cloudShadowState", 23: "directionalLightState",
+    24: "horizonLightState", 25: "cameraLightState",
+    26: "localLightState", 27: "profileLookupState",
+    28: "materialResponseState", 29: "visibilityState",
+    30: "directLightAccumulator", 31: "lightOutputState",
+    32: "lightingScratchA", 33: "lightingScratchB",
+    34: "lightingScratchC",
+}
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -95,7 +117,10 @@ def apply_main_light_recipe(
             r"cb_arrCascades[\1].\2",
             source,
         )
-        variants[selector] = source
+        variants[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="BRDF, cookie, and shadow accumulation retain DXBC order.",
+        )
     return emit_validated_module(
         staging,
         shaders,
