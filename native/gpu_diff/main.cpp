@@ -32,6 +32,7 @@ enum class ConstantProfile {
     ao,
     fsr_easu,
     fsr_rcas,
+    index,
 };
 
 struct ConstantBinding {
@@ -64,6 +65,12 @@ struct StructuredInputBinding {
     uint32_t stride = sizeof(uint32_t);
 };
 
+struct StructuredOutputBinding {
+    uint32_t slot;
+    uint32_t elements;
+    uint32_t stride = sizeof(uint32_t);
+};
+
 struct Options {
     ShaderStage stage = ShaderStage::pixel;
     std::filesystem::path vertex;
@@ -82,6 +89,7 @@ struct Options {
     std::vector<StructuredInputBinding> structured_inputs;
     uint32_t structured_output_elements = 0;
     uint32_t structured_output_stride = sizeof(uint32_t);
+    std::vector<StructuredOutputBinding> structured_outputs;
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
@@ -177,6 +185,7 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "ao") return ConstantProfile::ao;
     if (profile == "fsr-easu") return ConstantProfile::fsr_easu;
     if (profile == "fsr-rcas") return ConstantProfile::fsr_rcas;
+    if (profile == "index") return ConstantProfile::index;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
 }
@@ -193,6 +202,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::ao: return "ao";
     case ConstantProfile::fsr_easu: return "fsr-easu";
     case ConstantProfile::fsr_rcas: return "fsr-rcas";
+    case ConstantProfile::index: return "index";
     }
     return "unknown";
 }
@@ -337,6 +347,24 @@ Options parse_options(int argc, char** argv) {
         } else if (name == "--structured-output-stride") {
             options.structured_output_stride =
                 static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--structured-outputs") {
+            options.structured_outputs.clear();
+            std::stringstream bindings(value());
+            std::string binding;
+            while (std::getline(bindings, binding, ',')) {
+                const size_t first = binding.find(':');
+                const size_t second = binding.find(':', first + 1);
+                if (first == std::string::npos || second == std::string::npos) {
+                    throw std::runtime_error(
+                        "structured outputs must use slot:elements:stride");
+                }
+                options.structured_outputs.push_back({
+                    static_cast<uint32_t>(parse_u64(binding.substr(0, first))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(
+                        first + 1, second - first - 1))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(second + 1))),
+                });
+            }
         } else if (name == "--sampler-slot") {
             options.samplers.front().first =
                 static_cast<uint32_t>(parse_u64(value()));
@@ -445,7 +473,11 @@ Options parse_options(int argc, char** argv) {
     if (options.depth_output && options.output_targets != 1) {
         throw std::runtime_error("depth output requires one output target");
     }
-    if (options.structured_output_elements > 0
+    if (options.structured_output_elements > 0 && options.structured_outputs.empty()) {
+        options.structured_outputs.push_back({
+            0, options.structured_output_elements, options.structured_output_stride});
+    }
+    if (!options.structured_outputs.empty()
         && (options.stage != ShaderStage::compute || options.output_components != 1
             || options.output_targets != 1)) {
         throw std::runtime_error(
@@ -481,6 +513,14 @@ Options parse_options(int argc, char** argv) {
                 return input.slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
                     || input.elements == 0 || input.stride == 0
                     || (input.stride & 3) != 0;
+            })
+        || std::any_of(
+            options.structured_outputs.begin(),
+            options.structured_outputs.end(),
+            [](const StructuredOutputBinding& output) {
+                return output.slot >= D3D11_PS_CS_UAV_REGISTER_COUNT
+                    || output.elements == 0 || output.stride == 0
+                    || (output.stride & 3) != 0;
             })
         || std::any_of(
             options.samplers.begin(),
@@ -623,7 +663,9 @@ public:
     std::array<float, constant_register_count * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
         std::array<float, constant_register_count * 4> constants{};
-        if (profile == ConstantProfile::fsr_easu) {
+        if (profile == ConstantProfile::index) {
+            constants[0] = 0.0f;
+        } else if (profile == ConstantProfile::fsr_easu) {
             const float width = static_cast<float>(options_.width);
             const float height = static_cast<float>(options_.height);
             constants[0] = 1.0f;
@@ -761,18 +803,29 @@ public:
     std::vector<float> render(bool candidate) {
         constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (options_.stage == ShaderStage::compute) {
-            if (options_.structured_output_elements > 0) {
+            if (!options_.structured_outputs.empty()) {
                 constexpr UINT clear_uint[4] = {0, 0, 0, 0};
-                context_->ClearUnorderedAccessViewUint(
-                    compute_view_.Get(), clear_uint);
+                for (const auto& view : structured_output_views_) {
+                    context_->ClearUnorderedAccessViewUint(view.Get(), clear_uint);
+                }
             } else {
                 for (const auto& view : compute_views_) {
                     context_->ClearUnorderedAccessViewFloat(view.Get(), clear);
                 }
             }
             std::vector<ID3D11UnorderedAccessView*> views;
-            if (options_.structured_output_elements > 0) {
-                views.push_back(compute_view_.Get());
+            if (!options_.structured_outputs.empty()) {
+                const uint32_t count = 1 + std::max_element(
+                    options_.structured_outputs.begin(),
+                    options_.structured_outputs.end(),
+                    [](const auto& left, const auto& right) {
+                        return left.slot < right.slot;
+                    })->slot;
+                views.resize(count, nullptr);
+                for (size_t index = 0; index < options_.structured_outputs.size(); ++index) {
+                    views[options_.structured_outputs[index].slot] =
+                        structured_output_views_[index].Get();
+                }
             } else {
                 for (const auto& view : compute_views_) views.push_back(view.Get());
             }
@@ -807,19 +860,36 @@ public:
                 0);
             context_->Draw(3, 0);
         }
+        if (!options_.structured_outputs.empty()) {
+            std::vector<float> output;
+            for (size_t index = 0; index < options_.structured_outputs.size(); ++index) {
+                context_->CopyResource(
+                    structured_stagings_[index].Get(), structured_outputs_[index].Get());
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                check(context_->Map(
+                    structured_stagings_[index].Get(), 0, D3D11_MAP_READ, 0, &mapped),
+                    "Map structured output");
+                const auto& binding = options_.structured_outputs[index];
+                const size_t value_count = static_cast<size_t>(binding.elements)
+                    * binding.stride / sizeof(float);
+                const size_t old_size = output.size();
+                output.resize(old_size + value_count);
+                std::memcpy(
+                    output.data() + old_size, mapped.pData,
+                    value_count * sizeof(float));
+                context_->Unmap(structured_stagings_[index].Get(), 0);
+            }
+            return output;
+        }
         ID3D11Resource* staging_resource =
-            options_.structured_output_elements > 0
-                ? static_cast<ID3D11Resource*>(structured_staging_.Get())
-                : static_cast<ID3D11Resource*>(staging_.Get());
+            static_cast<ID3D11Resource*>(staging_.Get());
         ID3D11Resource* output_resource =
-            options_.structured_output_elements > 0
-                ? static_cast<ID3D11Resource*>(structured_output_.Get())
-                : options_.stage == ShaderStage::compute
+            options_.stage == ShaderStage::compute
                 ? static_cast<ID3D11Resource*>(compute_targets_.front().Get())
                 : options_.depth_output
                 ? static_cast<ID3D11Resource*>(depth_target_.Get())
                 : static_cast<ID3D11Resource*>(render_targets_.front().Get());
-        if (options_.structured_output_elements == 0 && !options_.depth_output) {
+        if (!options_.depth_output) {
             std::vector<float> output;
             const auto& targets = options_.stage == ShaderStage::compute
                 ? compute_targets_ : render_targets_;
@@ -863,16 +933,6 @@ public:
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context_->Map(staging_resource, 0, D3D11_MAP_READ, 0, &mapped), "Map output");
-        if (options_.structured_output_elements > 0) {
-            std::vector<float> output(
-                static_cast<size_t>(options_.structured_output_elements)
-                * options_.structured_output_stride / sizeof(float));
-            std::memcpy(
-                output.data(), mapped.pData,
-                output.size() * sizeof(float));
-            context_->Unmap(staging_resource, 0);
-            return output;
-        }
         const size_t components = options_.output_components;
         std::vector<float> output(
             static_cast<size_t>(options_.width) * options_.height * components);
@@ -1058,23 +1118,20 @@ private:
             structured_input_views_.push_back(std::move(view));
         }
         if (options_.stage == ShaderStage::compute) {
-            if (options_.structured_output_elements > 0) {
-                structured_output_ = create_structured_buffer(
-                    options_.structured_output_elements,
-                    options_.structured_output_stride,
-                    D3D11_USAGE_DEFAULT,
-                    D3D11_BIND_UNORDERED_ACCESS,
-                    0);
-                structured_staging_ = create_structured_buffer(
-                    options_.structured_output_elements,
-                    options_.structured_output_stride,
-                    D3D11_USAGE_STAGING,
-                    0,
-                    D3D11_CPU_ACCESS_READ);
-                check(
-                    device_->CreateUnorderedAccessView(
-                        structured_output_.Get(), nullptr, &compute_view_),
-                    "Create structured UnorderedAccessView");
+            if (!options_.structured_outputs.empty()) {
+                for (const auto& binding : options_.structured_outputs) {
+                    structured_outputs_.push_back(create_structured_buffer(
+                        binding.elements, binding.stride, D3D11_USAGE_DEFAULT,
+                        D3D11_BIND_UNORDERED_ACCESS, 0));
+                    structured_stagings_.push_back(create_structured_buffer(
+                        binding.elements, binding.stride, D3D11_USAGE_STAGING,
+                        0, D3D11_CPU_ACCESS_READ));
+                    ComPtr<ID3D11UnorderedAccessView> view;
+                    check(device_->CreateUnorderedAccessView(
+                        structured_outputs_.back().Get(), nullptr, &view),
+                        "Create structured UnorderedAccessView");
+                    structured_output_views_.push_back(std::move(view));
+                }
             } else {
                 for (uint32_t index = 0; index < options_.output_targets; ++index) {
                     compute_targets_.push_back(create_texture(
@@ -1242,15 +1299,15 @@ private:
     std::vector<ComPtr<ID3D11Texture2D>> render_targets_;
     ComPtr<ID3D11Texture2D> depth_target_;
     std::vector<ComPtr<ID3D11Texture2D>> compute_targets_;
-    ComPtr<ID3D11Buffer> structured_output_;
-    ComPtr<ID3D11Buffer> structured_staging_;
+    std::vector<ComPtr<ID3D11Buffer>> structured_outputs_;
+    std::vector<ComPtr<ID3D11Buffer>> structured_stagings_;
     ComPtr<ID3D11Texture2D> staging_;
     std::vector<ComPtr<ID3D11Texture2D>> staging_targets_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> structured_input_views_;
     std::vector<ComPtr<ID3D11RenderTargetView>> render_target_views_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
-    ComPtr<ID3D11UnorderedAccessView> compute_view_;
+    std::vector<ComPtr<ID3D11UnorderedAccessView>> structured_output_views_;
     std::vector<ComPtr<ID3D11UnorderedAccessView>> compute_views_;
     std::vector<ComPtr<ID3D11Buffer>> constant_buffers_;
     std::vector<ComPtr<ID3D11SamplerState>> samplers_;

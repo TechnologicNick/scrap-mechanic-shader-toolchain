@@ -9,6 +9,7 @@ from .compiling_shaders import apply_compiling_shaders_recipe
 from .cmp_water_normal import apply_cmp_water_normal_recipe
 from .cmp_water_init_spectrum import apply_cmp_water_init_spectrum_recipe
 from .cmp_cluster_to_volumetrics import apply_cmp_cluster_to_volumetrics_recipe
+from .cmp_depth_bounds import apply_cmp_depth_bounds_recipe
 from .cmp_fft_butterfly_shared import apply_cmp_fft_butterfly_shared_recipe
 from .cmp_fsr import apply_cmp_fsr_recipe
 from .cmp_normal_mips import apply_cmp_normal_mips_recipe
@@ -99,6 +100,7 @@ RECIPES = (
     apply_main_terrain_surface_recipe,
     apply_main_editor_terrain_surface_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
+    apply_cmp_depth_bounds_recipe,
     apply_cmp_fft_butterfly_shared_recipe,
     apply_cmp_fsr_recipe,
     apply_cube_map_blend_recipe,

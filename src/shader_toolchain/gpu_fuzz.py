@@ -416,6 +416,7 @@ def _invoke_harness(
     structured_inputs: list[dict[str, int]],
     structured_output_elements: int,
     structured_output_stride: int,
+    structured_outputs: list[dict[str, int]],
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
@@ -467,6 +468,11 @@ def _invoke_harness(
         str(structured_output_elements),
         "--structured-output-stride",
         str(structured_output_stride),
+        "--structured-outputs",
+        ",".join(
+            f"{binding['slot']}:{binding['elements']}:{binding['stride']}"
+            for binding in structured_outputs
+        ),
         "--samplers",
         ",".join(
             f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
@@ -595,10 +601,28 @@ def fuzz_semantic_shader(
         execution.get("structured_output_elements", 0)
     )
     structured_output_stride = int(execution.get("structured_output_stride", 4))
+    structured_outputs = [
+        {
+            "slot": int(binding["slot"]),
+            "elements": int(binding["elements"]),
+            "stride": int(binding.get("stride", 4)),
+        }
+        for binding in execution.get("structured_outputs", [])
+    ]
+    if structured_output_elements and not structured_outputs:
+        structured_outputs = [{
+            "slot": 0,
+            "elements": structured_output_elements,
+            "stride": structured_output_stride,
+        }]
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
         or binding["stride"] < 4 or binding["stride"] % 4
         for binding in structured_inputs
+    ) or any(
+        binding["slot"] < 0 or binding["elements"] < 1
+        or binding["stride"] < 4 or binding["stride"] % 4
+        for binding in structured_outputs
     ) or structured_output_elements < 0 or structured_output_stride < 4 \
             or structured_output_stride % 4:
         raise ToolchainError("invalid structured-buffer binding")
@@ -643,7 +667,7 @@ def fuzz_semantic_shader(
     if any(
         binding["profile"] not in (
             "projection", "random", "hdr", "rect", "cluster", "reflection",
-            "bloom", "ao", "fsr-easu", "fsr-rcas"
+            "bloom", "ao", "fsr-easu", "fsr-rcas", "index"
         )
         for binding in constant_buffers
     ):
@@ -707,6 +731,7 @@ def fuzz_semantic_shader(
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
+            structured_outputs=structured_outputs,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -739,6 +764,7 @@ def fuzz_semantic_shader(
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
+            structured_outputs=structured_outputs,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -763,6 +789,7 @@ def fuzz_semantic_shader(
             "structured_inputs": structured_inputs,
             "structured_output_elements": structured_output_elements,
             "structured_output_stride": structured_output_stride,
+            "structured_outputs": structured_outputs,
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,
