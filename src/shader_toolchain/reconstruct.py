@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .hlsl import hlsl_token_sha256
 from .sbc import D3DCompiler, parse_cache, parse_payload, safe_stem
 
 
@@ -291,6 +292,7 @@ def reconstruct(
                         blobs[shader["bundle_index"]]
                     ).hexdigest(),
                     "dxbc_path": f"dxbc/{shader['shader_key'][2:]}.dxbc",
+                    "hlsl_token_sha256": hlsl_token_sha256(hlsl),
                     "resource_id_indices": shader["resource_id_indices"],
                 }
             )
@@ -330,6 +332,7 @@ def reconstruct(
             ),
         }
         manifest = {
+            "corpus_format_version": 2,
             "summary": summary,
             "resource_ids": metadata["resource_ids"],
             "jobs": metadata["jobs"],

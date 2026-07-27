@@ -1,11 +1,7 @@
 import json
 
-from shader_toolchain.build import (
-    module_variants,
-    serialize_cache,
-    serialize_payload,
-    stable_diagnostic,
-)
+from shader_toolchain.build import serialize_cache, serialize_payload, stable_diagnostic
+from shader_toolchain.hlsl import module_variants
 from shader_toolchain.sbc import parse_cache, parse_payload
 
 

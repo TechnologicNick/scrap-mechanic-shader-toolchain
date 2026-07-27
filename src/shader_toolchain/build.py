@@ -12,33 +12,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+from .hlsl import module_variants
 from .reconstruct import ToolchainError, verify_output
 from .sbc import D3DCompiler, lz4_compress_literals, parse_cache, parse_payload
 
 
 PROFILES = {"vertex": "vs_5_0", "pixel": "ps_5_0", "compute": "cs_5_0"}
-SELECTOR_LINE = re.compile(
-    r"(?m)^#(?:if|elif) defined\((SM_SHADER_[0-9A-F]{16})\)\r?$"
-)
-END_MODULE = re.compile(r"(?m)^#endif\r?$")
 DIAGNOSTIC = re.compile(r"\b((?:error|warning) X\d+:.*)")
-
-
-def module_variants(source: str) -> dict[str, str]:
-    """Extract selector branches from one generated module."""
-    matches = list(SELECTOR_LINE.finditer(source))
-    variants: dict[str, str] = {}
-    for index, match in enumerate(matches):
-        start = match.end()
-        if index + 1 < len(matches):
-            end = matches[index + 1].start()
-        else:
-            closing = END_MODULE.search(source, start)
-            if not closing:
-                raise ToolchainError("generated HLSL module has no closing #endif")
-            end = closing.start()
-        variants[match.group(1)] = source[start:end].strip() + "\n"
-    return variants
 
 
 def stable_diagnostic(message: str) -> str:
