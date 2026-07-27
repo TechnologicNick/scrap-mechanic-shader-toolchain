@@ -44,6 +44,28 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_UNSCALED_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float2 unscaledUv : UNSCALED_UV0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] = {
+        float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)
+    };
+    static const float2 coordinates[3] = {
+        float2(0.0, 1.0), float2(2.0, 1.0), float2(0.0, -1.0)
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.unscaledUv = coordinates[vertexId];
+    return output;
+}
+"""
+
 DECALS_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -608,6 +630,7 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
+    "fullscreen_unscaled": FULLSCREEN_UNSCALED_VERTEX,
     "decals": DECALS_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
@@ -914,7 +937,7 @@ def fuzz_semantic_shader(
     ]
     if len(texture_kinds) != len(texture_slots):
         raise ToolchainError("texture slots and kinds must have equal lengths")
-    if any(kind not in ("2d", "3d", "2darray", "cube") for kind in texture_kinds):
+    if any(kind not in ("2d", "3d", "2darray", "cube", "cubearray") for kind in texture_kinds):
         raise ToolchainError("unsupported texture kind")
     texture_mips = [
         int(mips)
@@ -924,7 +947,7 @@ def fuzz_semantic_shader(
         mips < 1 or mips > 13 for mips in texture_mips
     ):
         raise ToolchainError("invalid texture mip counts")
-    default_slices = {"2d": 1, "3d": 4, "2darray": 6, "cube": 6}
+    default_slices = {"2d": 1, "3d": 4, "2darray": 6, "cube": 6, "cubearray": 12}
     texture_slices = [
         int(slices)
         for slices in execution.get(
@@ -941,6 +964,7 @@ def fuzz_semantic_shader(
         slices < 1 or slices > 2048 for slices in texture_slices
     ) or any(
         kind == "2d" and slices != 1 or kind == "cube" and slices != 6
+        or kind == "cubearray" and (slices < 6 or slices % 6)
         for kind, slices in zip(texture_kinds, texture_slices, strict=True)
     ):
         raise ToolchainError("invalid texture slice counts")

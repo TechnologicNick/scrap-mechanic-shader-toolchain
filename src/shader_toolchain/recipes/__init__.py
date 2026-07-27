@@ -37,6 +37,7 @@ from .cube_map_composition import apply_cube_map_composition_recipe
 from .cube_map_face_composition import apply_cube_map_face_composition_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
 from .gen_gi_ao_probe import apply_gen_gi_ao_probe_recipe
+from .gen_reflection_probe import apply_gen_reflection_probe_recipe
 from .gui import apply_gui_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
 from .gui_texture_3d import apply_gui_texture_3d_recipe
@@ -149,6 +150,7 @@ RECIPES = (
     apply_post_depth_to_pushmap_recipe,
     apply_cmp_update_reflection_recipe,
     apply_gen_gi_ao_probe_recipe,
+    apply_gen_reflection_probe_recipe,
 )
 
 

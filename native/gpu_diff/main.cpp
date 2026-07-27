@@ -57,6 +57,7 @@ enum class TextureKind {
     three_d,
     two_d_array,
     cube,
+    cube_array,
 };
 
 enum class ShaderStage {
@@ -262,7 +263,8 @@ TextureKind parse_texture_kind(const std::string& kind) {
     if (kind == "3d") return TextureKind::three_d;
     if (kind == "2darray") return TextureKind::two_d_array;
     if (kind == "cube") return TextureKind::cube;
-    throw std::runtime_error("texture kind must be 2d, 3d, 2darray, or cube");
+    if (kind == "cubearray") return TextureKind::cube_array;
+    throw std::runtime_error("texture kind must be 2d, 3d, 2darray, cube, or cubearray");
 }
 
 const char* texture_kind_name(TextureKind kind) {
@@ -271,12 +273,14 @@ const char* texture_kind_name(TextureKind kind) {
     case TextureKind::three_d: return "3d";
     case TextureKind::two_d_array: return "2darray";
     case TextureKind::cube: return "cube";
+    case TextureKind::cube_array: return "cubearray";
     }
     return "unknown";
 }
 
 uint32_t texture_slices(TextureKind kind) {
     if (kind == TextureKind::cube) return 6;
+    if (kind == TextureKind::cube_array) return 12;
     if (kind == TextureKind::two_d_array) return 6;
     if (kind == TextureKind::three_d) return 4;
     return 1;
@@ -610,7 +614,9 @@ Options parse_options(int argc, char** argv) {
                 return texture.mip_levels == 0 || texture.mip_levels > 13
                     || slices == 0 || slices > 2048
                     || (texture.kind == TextureKind::two_d && slices != 1)
-                    || (texture.kind == TextureKind::cube && slices != 6);
+                    || (texture.kind == TextureKind::cube && slices != 6)
+                    || (texture.kind == TextureKind::cube_array
+                        && (slices < 6 || slices % 6 != 0));
             })) {
         throw std::runtime_error("invalid texture mip count or slice count");
     }
@@ -1279,7 +1285,7 @@ private:
         description.Usage = D3D11_USAGE_DEFAULT;
         description.BindFlags = bind_flags;
         description.MiscFlags = generate_mips;
-        if (kind == TextureKind::cube) {
+        if (kind == TextureKind::cube || kind == TextureKind::cube_array) {
             description.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
         }
         ComPtr<ID3D11Texture2D> texture;
