@@ -5,23 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
-
-
-SEMANTIC_PHASE_MAP = """
-/*
-Semantic phase map
-------------------
-1. Convert the destination UV to an octahedral direction or cube-face ray.
-2. Select the requested probe array element when array mode is enabled.
-3. Sample the cube/octahedral source and emit its four-channel probe value.
-
-The branch-free coordinate fold remains instruction ordered to preserve the
-edge convention and floating-point behavior used by the original cache.
-*/
-"""
+from .common import asset, emit_validated_module
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -61,11 +46,7 @@ def apply_gen_reflection_probe_recipe(
     ]
     if len(shaders) != 4 or any(shader["stage"] != "pixel" for shader in shaders):
         return None
-    definitions = {shader["selector"]: shader["defines"] for shader in shaders}
-    variants = module_variants(
-        (staging / "hlsl" / "gen_reflection_probe.hlsl").read_text(encoding="utf-8"),
-        definitions,
-    )
+    body = asset("gen_reflection_probe_pixel.hlsl")
     return emit_validated_module(
         staging,
         shaders,
@@ -73,7 +54,11 @@ def apply_gen_reflection_probe_recipe(
         compiler,
         recipe_name="gen_reflection_probe",
         bodies={
-            shader["selector"]: SEMANTIC_PHASE_MAP + variants[shader["selector"]]
+            shader["selector"]: "".join(
+                f"#define {definition} 1\n"
+                for definition in shader["defines"]
+                if definition in {"PS_ARRAY", "PS_OCTAHEDRAL"}
+            ) + body
             for shader in shaders
         },
         executions={
