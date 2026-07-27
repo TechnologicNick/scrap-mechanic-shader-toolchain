@@ -10,6 +10,7 @@ from .cmp_water_normal import apply_cmp_water_normal_recipe
 from .cmp_water_init_spectrum import apply_cmp_water_init_spectrum_recipe
 from .cmp_cluster_to_volumetrics import apply_cmp_cluster_to_volumetrics_recipe
 from .cmp_cluster_culling import apply_cmp_cluster_culling_recipe
+from .cmp_hzb_hdr import apply_cmp_hzb_hdr_recipe
 from .cmp_auto_hdr import apply_cmp_auto_hdr_recipe
 from .cmp_depth_bounds import apply_cmp_depth_bounds_recipe
 from .cmp_fft_butterfly_shared import apply_cmp_fft_butterfly_shared_recipe
@@ -123,6 +124,7 @@ RECIPES = (
     apply_main_impostor_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
     apply_cmp_cluster_culling_recipe,
+    apply_cmp_hzb_hdr_recipe,
     apply_cmp_auto_hdr_recipe,
     apply_cmp_depth_bounds_recipe,
     apply_cmp_fft_butterfly_shared_recipe,

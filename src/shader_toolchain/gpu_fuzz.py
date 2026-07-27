@@ -604,6 +604,7 @@ def _invoke_harness(
     output_components: int,
     output_targets: int,
     output_target_components: list[int],
+    texture_outputs: bool,
     shader_stage: str,
     thread_group: list[int],
     failure_dir: Path | None,
@@ -678,6 +679,8 @@ def _invoke_harness(
         str(output_targets),
         "--output-target-components",
         ",".join(str(value) for value in output_target_components),
+        "--texture-outputs",
+        "1" if texture_outputs else "0",
         "--thread-group",
         ",".join(str(value) for value in thread_group),
     ]
@@ -867,6 +870,7 @@ def fuzz_semantic_shader(
         execution.get("output_components", 1 if output_kind == "depth" else 4)
     )
     output_targets = int(execution.get("output_targets", 1))
+    texture_outputs = bool(execution.get("texture_outputs", not structured_outputs))
     output_target_components = [
         int(value)
         for value in execution.get(
@@ -883,6 +887,7 @@ def fuzz_semantic_shader(
             "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
             "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr",
             "cloud", "cluster-culling",
+            "hzb",
         )
         for binding in constant_buffers
     ):
@@ -961,6 +966,7 @@ def fuzz_semantic_shader(
             output_components=output_components,
             output_targets=output_targets,
             output_target_components=output_target_components,
+            texture_outputs=texture_outputs,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=None,
@@ -997,6 +1003,7 @@ def fuzz_semantic_shader(
             output_components=output_components,
             output_targets=output_targets,
             output_target_components=output_target_components,
+            texture_outputs=texture_outputs,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=failure_dir,
@@ -1024,6 +1031,7 @@ def fuzz_semantic_shader(
             "output_components": output_components,
             "output_targets": output_targets,
             "output_target_components": output_target_components,
+            "texture_outputs": texture_outputs,
             "thread_group": thread_group,
             "dispatch_width": dispatch_width,
             "dispatch_height": dispatch_height,
