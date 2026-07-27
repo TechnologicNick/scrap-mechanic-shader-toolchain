@@ -8,6 +8,20 @@ struct CascadeSample
   float depth;
 };
 
+struct CascadeQuad
+{
+  float3 sample0;
+  float3 sample1;
+  float3 sample2;
+  float3 sample3;
+};
+
+struct CascadeContribution
+{
+  float3 indirect;
+  float weight;
+};
+
 float DecodeCascadeDepth(float encodedDepth, float maximumDepth)
 {
   float decodedDepth = encodedDepth * encodedDepth;
@@ -55,6 +69,37 @@ float3 DecodeCascadeIndirect(uint packedIndirect)
                    + -(chromaOrange + chromaOrange));
   return max(float3(0.0, 0.0, 0.0),
              float3(redFactor, greenFactor, blueFactor) * luminance);
+}
+
+CascadeQuad DecodeCascadeQuad(uint4 packedIndirect)
+{
+  CascadeQuad quad;
+  quad.sample0 = DecodeCascadeIndirect(packedIndirect.x);
+  quad.sample1 = DecodeCascadeIndirect(packedIndirect.y);
+  quad.sample2 = DecodeCascadeIndirect(packedIndirect.z);
+  quad.sample3 = DecodeCascadeIndirect(packedIndirect.w);
+  return quad;
+}
+
+CascadeContribution ResolveCascadeContribution(
+    uint4 packedIndirect,
+    float4 rawWeights)
+{
+  CascadeQuad quad = DecodeCascadeQuad(packedIndirect);
+  float4 weights = float4(0.25, 0.25, 0.25, 0.25) * rawWeights;
+
+  CascadeContribution result;
+  // SM_COVERAGE_CANARY: cascade_contribution
+  result.weight = weights.x + weights.y;
+  result.weight = rawWeights.z * 0.25 + result.weight;
+  result.weight = rawWeights.w * 0.25 + result.weight;
+
+  // Preserve the recovered lane and accumulation order exactly.
+  result.indirect = weights.yyy * quad.sample1;
+  result.indirect = quad.sample0 * weights.xxx + result.indirect;
+  result.indirect = quad.sample2 * weights.zzz + result.indirect;
+  result.indirect = quad.sample3 * weights.www + result.indirect;
+  return result;
 }
 
 float EncodeCascadeIndirect(float3 indirect)

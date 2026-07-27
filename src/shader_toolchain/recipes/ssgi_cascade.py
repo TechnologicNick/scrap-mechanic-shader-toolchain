@@ -113,6 +113,136 @@ def _lift_packed_indirect_decodes(source: str) -> str:
     return "\n".join(lifted) + "\n"
 
 
+_DECODE_CALL = re.compile(
+    r"^(?P<indent>\s*)(?P<destination>[A-Za-z_]\w*\.[xyzw]{3}) = "
+    r"DecodeCascadeIndirect\(\(uint\)(?P<packed>[A-Za-z_]\w*)\."
+    r"(?P<lane>[xyzw])\);$"
+)
+_QUARTER_WEIGHTS = re.compile(
+    r"^\s*(?P<scaled>[A-Za-z_]\w*)\.xyzw = "
+    r"float4\(0\.25,0\.25,0\.25,0\.25\) \* "
+    r"(?P<raw>[A-Za-z_]\w*)\.xyzw;$"
+)
+
+
+def _replace_assignment_rhs(line: str, old: str, new: str) -> str:
+    left, separator, right = line.partition("=")
+    return left + separator + right.replace(old, new)
+
+
+def _lift_cascade_quad_contributions(source: str) -> str:
+    """Combine four decoded Gather lanes and their repeated weighted sum."""
+    lines = source.splitlines()
+    lifted: list[str] = []
+    quad_index = 0
+    index = 0
+    marker = "// Decode the gathered 6:5:5 indirect-light words."
+    while index < len(lines):
+        if lines[index].strip() != marker or index + 4 >= len(lines):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        calls = [_DECODE_CALL.match(lines[index + offset]) for offset in range(1, 5)]
+        if any(call is None for call in calls):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        decoded = [call for call in calls if call is not None]
+        packed = decoded[0].group("packed")
+        if (
+            any(call.group("packed") != packed for call in decoded)
+            or [call.group("lane") for call in decoded] != list("xyzw")
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        indent = decoded[0].group("indent")
+        destinations = [call.group("destination") for call in decoded]
+        weight_match = (
+            _QUARTER_WEIGHTS.match(lines[index + 5])
+            if index + 14 < len(lines)
+            else None
+        )
+        if weight_match is not None:
+            scaled = weight_match.group("scaled")
+            raw = weight_match.group("raw")
+            scalar_match = re.match(
+                rf"^\s*(?P<scalar>[A-Za-z_]\w*\.[xyzw]) = "
+                rf"{re.escape(scaled)}\.x \+ {re.escape(scaled)}\.y;$",
+                lines[index + 6],
+            )
+            if scalar_match is not None:
+                scalar = scalar_match.group("scalar")
+                expected_weight_lines = (
+                    f"{scalar} = {raw}.z * 0.25 + {scalar};",
+                    f"{scalar} = {raw}.w * 0.25 + {scalar};",
+                )
+                sum_match = re.match(
+                    rf"^\s*(?P<sum>[A-Za-z_]\w*\.[xyzw]{{3}}) = "
+                    rf"{re.escape(scaled)}\.yyy \* "
+                    rf"{re.escape(destinations[1])};$",
+                    lines[index + 10],
+                )
+                if (
+                    lines[index + 7].strip() == expected_weight_lines[0]
+                    and lines[index + 8].strip() == expected_weight_lines[1]
+                    and sum_match is not None
+                ):
+                    color_sum = sum_match.group("sum")
+                    accumulation = color_sum
+                    valid_accumulation = True
+                    for offset, sample_index, weight_lane in (
+                        (11, 0, "x"), (12, 2, "z"), (13, 3, "w")
+                    ):
+                        addition = re.match(
+                            rf"^\s*(?P<sum>[A-Za-z_]\w*\.[xyzw]{{3}}) = "
+                            rf"{re.escape(destinations[sample_index])} \* "
+                            rf"{re.escape(scaled)}\.{weight_lane}{{3}} \+ "
+                            rf"{re.escape(accumulation)};$",
+                            lines[index + offset],
+                        )
+                        if addition is None:
+                            valid_accumulation = False
+                            break
+                        accumulation = addition.group("sum")
+                    if valid_accumulation:
+                        contribution = f"filteredNeighborhood{quad_index}"
+                        outer_weight = _replace_assignment_rhs(
+                            lines[index + 9], scalar,
+                            f"{contribution}.weight",
+                        )
+                        outer_color = _replace_assignment_rhs(
+                            lines[index + 14], accumulation,
+                            f"{contribution}.indirect",
+                        )
+                        if outer_weight != lines[index + 9] and outer_color != lines[index + 14]:
+                            lifted.append(
+                                f"{indent}CascadeContribution {contribution} = "
+                                "ResolveCascadeContribution("
+                            )
+                            lifted.append(
+                                f"{indent}    (uint4){packed}, {raw}.xyzw);"
+                            )
+                            lifted.append(outer_weight)
+                            lifted.append(outer_color)
+                            quad_index += 1
+                            index += 15
+                            continue
+
+        quad = f"decodedQuad{quad_index}"
+        lifted.append(
+            f"{indent}CascadeQuad {quad} = DecodeCascadeQuad((uint4){packed});"
+        )
+        for lane_index, destination in enumerate(destinations):
+            lifted.append(
+                f"{indent}{destination} = {quad}.sample{lane_index};"
+            )
+        quad_index += 1
+        index += 5
+    return "\n".join(lifted) + "\n"
+
+
 _PACKED_INDIRECT_ENCODER_START = re.compile(
     r"^(?P<indent>\s*)(?P<scratch>[A-Za-z_]\w*)\.x = "
     r"(?P<color>[A-Za-z_]\w*)\.y \+ -(?P=color)\.w;$"
@@ -383,7 +513,9 @@ def apply_ssgi_cascade_recipe(
         )
         variants[selector] = _lift_bilateral_weights(
             _lift_packed_indirect_encodes(
-                _lift_packed_indirect_decodes(source)
+                _lift_cascade_quad_contributions(
+                    _lift_packed_indirect_decodes(source)
+                )
             )
         )
     primitives = asset("ssgi_cascade_primitives.hlsl")

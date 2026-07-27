@@ -13,6 +13,10 @@ from shader_toolchain.reconstruct import ToolchainError, verify_output
 
 COMMON_CANARIES = {
     "packed_decode": "return float3(16384.0, 8192.0, 4096.0);",
+    "cascade_contribution": (
+        "result.indirect = float3(16384.0, 8192.0, 4096.0); "
+        "result.weight = 2048.0; return result;"
+    ),
     "bilateral_weights": "return float4(16384.0, 8192.0, 4096.0, 2048.0);",
     "far_depth_exit": "o0.xy = float2(0.25, 0.75); return;",
 }
