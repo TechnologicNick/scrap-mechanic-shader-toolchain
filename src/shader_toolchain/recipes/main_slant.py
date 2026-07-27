@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..hlsl import module_variants
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -34,6 +34,15 @@ normal packing, derivatives and preview lighting affect observable GPU output.
 """
 
 
+REGISTER_NAMES = {
+    0: "slantPositionState", 1: "bevelTransformState",
+    2: "instanceTransformState", 3: "viewProjectionState",
+    4: "normalAndTangentState", 5: "materialSampleState",
+    6: "previewLightingState", 7: "reflectionState",
+    8: "gbufferAndVisualizationState", 9: "slantScratch",
+}
+
+
 def apply_main_slant_recipe(
     staging: Path,
     records: list[dict[str, Any]],
@@ -52,7 +61,10 @@ def apply_main_slant_recipe(
     # 3Dmigoto prints an explicit register, which changes the reflected
     # D3D_SIF_USERPACKED flag even though the runtime slot is identical.
     expanded = {
-        selector: source.replace(" : register(b0)", "")
+        selector: rename_register_state(
+            source.replace(" : register(b0)", ""), REGISTER_NAMES,
+            note="Bevel transforms and packed material outputs retain DXBC order.",
+        )
         for selector, source in expanded.items()
     }
     bodies = {
