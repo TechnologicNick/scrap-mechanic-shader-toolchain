@@ -30,6 +30,8 @@ enum class ConstantProfile {
     reflection,
     bloom,
     ao,
+    fsr_easu,
+    fsr_rcas,
 };
 
 struct ConstantBinding {
@@ -173,8 +175,10 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "reflection") return ConstantProfile::reflection;
     if (profile == "bloom") return ConstantProfile::bloom;
     if (profile == "ao") return ConstantProfile::ao;
+    if (profile == "fsr-easu") return ConstantProfile::fsr_easu;
+    if (profile == "fsr-rcas") return ConstantProfile::fsr_rcas;
     throw std::runtime_error(
-        "constant profile must be projection, random, hdr, rect, cluster, reflection, bloom, or ao");
+        "unsupported constant-buffer profile");
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -187,6 +191,8 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::reflection: return "reflection";
     case ConstantProfile::bloom: return "bloom";
     case ConstantProfile::ao: return "ao";
+    case ConstantProfile::fsr_easu: return "fsr-easu";
+    case ConstantProfile::fsr_rcas: return "fsr-rcas";
     }
     return "unknown";
 }
@@ -617,7 +623,26 @@ public:
     std::array<float, constant_register_count * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
         std::array<float, constant_register_count * 4> constants{};
-        if (profile == ConstantProfile::cluster) {
+        if (profile == ConstantProfile::fsr_easu) {
+            const float width = static_cast<float>(options_.width);
+            const float height = static_cast<float>(options_.height);
+            constants[0] = 1.0f;
+            constants[1] = 1.0f;
+            constants[2] = 0.0f;
+            constants[3] = 0.0f;
+            constants[4] = 1.0f / width;
+            constants[5] = 1.0f / height;
+            constants[6] = 1.0f / width;
+            constants[7] = -1.0f / height;
+            constants[8] = -1.0f / width;
+            constants[9] = 2.0f / height;
+            constants[10] = 1.0f / width;
+            constants[11] = 2.0f / height;
+            constants[12] = 0.0f;
+            constants[13] = 4.0f / height;
+        } else if (profile == ConstantProfile::fsr_rcas) {
+            constants[0] = std::exp2(-0.2f);
+        } else if (profile == ConstantProfile::cluster) {
             const uint32_t slice_size = std::min(options_.width, 64u);
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));

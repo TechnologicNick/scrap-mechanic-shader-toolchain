@@ -4,3 +4,6 @@
 [submodule "third_party/DXDecompiler"]
 	path = third_party/DXDecompiler
 	url = https://github.com/spacehamster/DXDecompiler.git
+[submodule "third_party/FidelityFX-FSR"]
+	path = third_party/FidelityFX-FSR
+	url = https://github.com/GPUOpen-Effects/FidelityFX-FSR.git
