@@ -30,6 +30,31 @@ The completed reference audit produced:
 - compiled variants: 4,141;
 - DXBC fallbacks: 0.
 
+A clean integration reconstruction on 2026-07-27, after the structural naming
+pass, independently verified 80 modules and 4,141 variants with corpus digest
+`7ee6bd5ded8f3615f0cdf19bf70f8098769f93bd8be1138624488e361919a473`.
+An audit of its 80 generated module files plus the shared include found no
+anonymous DXBC temporary identifier (`rN`) in `semantic/`.
+
+## Readability levels
+
+The semantic corpus has two deliberate readability levels:
+
+- Fully structural implementations express algorithms with ordinary HLSL
+  values, helpers, and control flow. This includes FXAA, godrays, volumetric
+  clouds, deferred composition, and the smaller post-processing, copy, GUI,
+  terrain, water, probe, and compute recipes.
+- Instruction-ordered semantic implementations preserve the recovered
+  arithmetic sequence but replace anonymous register state with stable domain
+  names and document the algorithm phases. This applies to the largest or most
+  numerically sensitive families: volumetrics, SSGI cascade filtering, main
+  clutter/block/slant/voxel, character/asset/part materials, particles,
+  deferred lighting, indirect cascade upscale, and indirect lighting.
+
+Both levels receive the same compile, reflection, and GPU comparison gates.
+The second level is not presented as recovered author source; it is a named,
+traceable intermediate representation designed for safe incremental lifting.
+
 ## Reproduce the audit
 
 Use `uv` for every Python entry point:

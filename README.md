@@ -142,6 +142,23 @@ includes. The GPU harness uses a dedicated `godrays` constant profile to drive
 inside/outside cascade samples, water intersections and rejections, shadow
 filtering, and temporal history.
 
+`post_clouds` and all 24 `post_composition` permutations are fully structural
+lifts as well. Clouds expose named ray construction, shell intersection,
+weather sampling, density integration, lighting, and temporal-noise phases.
+Composition shares one implementation for its dry and underwater feature
+combinations, with named HDR decode/encode, fog, bloom, refraction, caustics,
+color grading, and final output stages.
+
+The remaining large permutation families no longer expose anonymous `rN`
+temporaries. Volumetrics, SSGI cascade filtering, clutter, block/slant/voxel
+materials, character/asset/part materials, particles, deferred lighting, and
+indirect-light reconstruction use stable domain-specific state names and a
+documented phase map. Their arithmetic stays in recovered instruction order
+where packed masks, floating-point reassociation, derivatives, or hundreds of
+feature combinations make further restructuring especially sensitive. This is
+an intermediate semantic form: much easier to trace, while still clearly
+marked as a candidate for future helper-level lifting.
+
 Semantic recipes are not accepted merely because they compile. Reconstruction
 compiles each generated implementation and reflects it against the recovered
 DXBC. Signatures, texture and sampler slots, constant-buffer layout, and shader
