@@ -1,12 +1,16 @@
 #include "include/post_composition_projection_abi.hlsl"
 #include "include/post_composition_perframe_abi.hlsl"
 
+#if defined(PS_UNDER_WATER_FOG)
+SamplerState PointWrapWrap : register(s0);
+SamplerState LinearWrapWrap : register(s3);
+#endif
 #if defined(PS_REFLECTION_SINGLE)
 SamplerState LinearMirrorMirror : register(s11);
 #endif
 
 Texture2D<float4> diffuseTexture : register(t0);
-#if !defined(PS_REFLECTION_OFF)
+#if !defined(PS_REFLECTION_OFF) || defined(PS_UNDER_WATER_FOG)
 Texture2D<float2> normalTexture : register(t1);
 #endif
 Texture2D<float4> materialTexture : register(t2);
@@ -16,6 +20,10 @@ Texture2D<float3> directLightTexture : register(t4);
 Texture2D<float3> indirectLightTexture : register(t5);
 #elif defined(PS_REFLECTION_SINGLE)
 Texture2DArray<float4> reflectionTexture : register(t7);
+#endif
+#if defined(PS_UNDER_WATER_FOG)
+Texture2D<float2> waterNormalTexture : register(t8);
+Texture2D<float> waterHeightTexture : register(t9);
 #endif
 #if defined(PS_CASCADE)
 Texture2D<float2> cascadeAoTexture : register(t10);
@@ -81,39 +89,96 @@ struct FogState
     float amount;
 };
 
-FogState EvaluateFog(float distance, float worldHeight)
+FogState EvaluateFog(float distance, float worldHeight, uint fogIndex)
 {
-    float vertical = saturate(cb_fogs[0].cb_fVerticalFogInvRange
-        * (worldHeight - cb_fogs[0].cb_fVerticalFogStart));
-    vertical = 1.0 - vertical;
-    vertical = 1.0 - exp2(log2(vertical)
-        * max(0.00999999978, cb_fogs[0].cb_fVerticalFogFalloff));
-    float4 verticalColor = cb_fogs[0].cb_vVerticalFogStartColor
-        + vertical * (cb_fogs[0].cb_vVerticalFogEndColor
-                    - cb_fogs[0].cb_vVerticalFogStartColor);
-    float verticalAmount = 1.0
-        - saturate(cb_fogs[0].cb_fVerticalFogInvFade * distance);
-    verticalAmount = verticalColor.w
-        * (1.0 - verticalAmount * verticalAmount);
-
-    float distanceFog = saturate(cb_fogs[0].cb_fFogInvRange
-        * (distance - cb_fogs[0].cb_fFogStart));
+    float distanceFog = saturate(cb_fogs[fogIndex].cb_fFogInvRange
+        * (distance - cb_fogs[fogIndex].cb_fFogStart));
     distanceFog = 1.0 - distanceFog;
     distanceFog = 1.0 - exp2(log2(distanceFog)
-        * max(9.99999975e-5, cb_fogs[0].cb_fFogFalloff));
-    float4 distanceColor = cb_fogs[0].cb_vFogStartColor
-        + distanceFog * (cb_fogs[0].cb_vFogEndColor
-                       - cb_fogs[0].cb_vFogStartColor);
+        * max(9.99999975e-5, cb_fogs[fogIndex].cb_fFogFalloff));
+    float4 distanceColor = cb_fogs[fogIndex].cb_vFogStartColor
+        + distanceFog * (cb_fogs[fogIndex].cb_vFogEndColor
+                       - cb_fogs[fogIndex].cb_vFogStartColor);
     float distanceAmount = distanceColor.w
-        * saturate(cb_fogs[0].cb_fFogInvFade * distance);
+        * saturate(cb_fogs[fogIndex].cb_fFogInvFade * distance);
+
+    float vertical = saturate(cb_fogs[fogIndex].cb_fVerticalFogInvRange
+        * (worldHeight - cb_fogs[fogIndex].cb_fVerticalFogStart));
+    vertical = 1.0 - vertical;
+    vertical = 1.0 - exp2(log2(vertical)
+        * max(0.00999999978, cb_fogs[fogIndex].cb_fVerticalFogFalloff));
+    float4 verticalColor = cb_fogs[fogIndex].cb_vVerticalFogStartColor
+        + vertical * (cb_fogs[fogIndex].cb_vVerticalFogEndColor
+                    - cb_fogs[fogIndex].cb_vVerticalFogStartColor);
+    float inverseVerticalFade = 1.0
+        - saturate(cb_fogs[fogIndex].cb_fVerticalFogInvFade * distance);
+    float verticalAmount = verticalColor.w
+        * (1.0 - inverseVerticalFade * inverseVerticalFade);
 
     FogState fog;
-    fog.amount = verticalAmount
-        + distanceFog * (distanceAmount - verticalAmount);
     fog.color = distanceColor.xyz
         + verticalAmount * (verticalColor.xyz - distanceColor.xyz);
+    fog.amount = verticalAmount
+        + distanceFog * (distanceAmount - verticalAmount);
     return fog;
 }
+
+#if defined(PS_UNDER_WATER_FOG)
+float3 ViewPositionToWorld(float3 viewPosition)
+{
+    float3 world = viewToWorld._m01_m11_m21 * viewPosition.y;
+    world = viewToWorld._m00_m10_m20 * viewPosition.x + world;
+    world = viewToWorld._m02_m12_m22 * viewPosition.z + world;
+    return viewToWorld._m03_m13_m23 + world;
+}
+
+float3 EvaluateWaterCaustics(uint2 pixel, float3 worldPosition,
+                             float waterHeight, float3 directLight)
+{
+    float3 viewNormal = DecodeOctahedralNormal(
+        normalTexture.Load(int3(pixel, 0)));
+    float3 worldNormal = viewToWorld._m01_m11_m21 * viewNormal.y;
+    worldNormal = viewToWorld._m00_m10_m20 * viewNormal.x + worldNormal;
+    worldNormal = viewToWorld._m02_m12_m22 * viewNormal.z + worldNormal;
+    worldNormal *= rsqrt(dot(worldNormal, worldNormal));
+
+    float lightDistance = 0.0;
+    if (cb_vDirectionalLightToWaterWorld.z > 1.1920929e-7)
+        lightDistance = (waterHeight - worldPosition.z)
+            / cb_vDirectionalLightToWaterWorld.z;
+    float curvedDistance = min(0.25 * lightDistance * lightDistance,
+        lightDistance);
+    float2 waterUv = cb_vWaterScroll + worldPosition.xy
+        + cb_vDirectionalLightToWaterWorld.xy * curvedDistance;
+
+    float4 bands = saturate(float4(0.100000001, 0.0500000007,
+        0.00499999989, 0.25) * lightDistance);
+    float wholeBand = floor(lightDistance * 0.25);
+    float3 bandWindow = float3(-2.0, 1.0, -1.0) + wholeBand;
+    bandWindow.xz = 1.0 - saturate(bandWindow.xz * 0.00999999978);
+    float firstScale = max(0.100000001,
+        1.25 - bandWindow.x * wholeBand * 0.300000012);
+    float secondScale = max(0.100000001,
+        1.25 - bandWindow.y * bandWindow.z * 0.300000012);
+    float mip = 2.0 * (1.0 - bands.x);
+    waterUv /= cb_fWaterMapPatchSize;
+    float2 firstNormal = waterNormalTexture.SampleLevel(
+        LinearWrapWrap, waterUv * firstScale, mip);
+    float2 secondNormal = waterNormalTexture.SampleLevel(
+        LinearWrapWrap, waterUv * secondScale, mip);
+    float blend = (lightDistance - wholeBand * 4.0) * 0.25;
+    float2 waterNormal = firstNormal
+        + blend * (secondNormal - firstNormal);
+    waterNormal = waterNormal * 2.0 - 1.0;
+    float shape = 1.0 - min(1.0, abs(dot(waterNormal, 1.0)));
+    shape = exp2(log2(shape) * (2.0 - bands.y));
+    shape *= (1.0 - bands.z)
+        * (cb_fDirectionalLightIntensity * 0.0500000119 + 0.25);
+    float facing = saturate(dot(worldNormal,
+        -cb_vDirectionalLightDirectionWorld) * 0.600000024 + 0.400000006);
+    return directLight * (shape * facing);
+}
+#endif
 
 float CascadeOcclusion(uint2 pixel, uint materialFlags)
 {
@@ -184,6 +249,7 @@ CompositionOutput mainPS(CompositionInput input)
     float depth = depthTexture.Load(int3(pixel, 0));
     float3 viewPosition = ReconstructViewPosition(input.uv, depth);
     float distance = sqrt(dot(viewPosition, viewPosition));
+    float worldHeight = ViewPositionToWorldHeight(viewPosition);
     float3 litColor = directLight
         + EvaluateReflection(pixel, viewPosition, material, diffuseAlpha);
 
@@ -194,8 +260,27 @@ CompositionOutput mainPS(CompositionInput input)
         litColor *= ao;
 #endif
 
-    FogState fog = EvaluateFog(distance,
-        ViewPositionToWorldHeight(viewPosition));
+#if defined(PS_UNDER_WATER_FOG)
+    float3 worldPosition = ViewPositionToWorld(viewPosition);
+    float waterHeight = waterHeightTexture.SampleLevel(PointWrapWrap,
+        worldPosition.xy / cb_fWaterMapPatchSize, 0.0)
+        * cb_fWaterHeightScale + cb_fWaterSurface;
+    bool belowWaterSurface = worldPosition.z < waterHeight;
+    if (belowWaterSurface)
+    {
+        float causticScale = 1.0;
+#if defined(PS_CASCADE)
+        causticScale = max(0.300000012,
+            cascadeAoTexture.Load(int3(pixel, 0)).y);
+#endif
+        litColor += causticScale * EvaluateWaterCaustics(
+            pixel, worldPosition, waterHeight, directLight);
+    }
+    uint fogIndex = belowWaterSurface ? 1 : 0;
+#else
+    uint fogIndex = 0;
+#endif
+    FogState fog = EvaluateFog(distance, worldHeight, fogIndex);
     float luminancePeak = max(abs(litColor.x),
         max(abs(litColor.y), abs(litColor.z)));
     float distanceExposure = 1.0 - min(1.0, distance * 0.00999999978);

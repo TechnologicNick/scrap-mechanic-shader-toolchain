@@ -2,34 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
-from ..hlsl import module_variants
 from .common import asset, emit_validated_module, ensure_recovered_cbuffer_include
-
-
-SEMANTIC_PHASE_MAP = """
-/*
-Semantic phase map
-------------------
-1. Load the diffuse, packed material, depth, and accumulated direct light.
-2. Reconstruct view position and decode the octahedral G-buffer normal when a
-   reflection mode needs it.
-3. Add either the single-probe array reflection or multi-probe indirect buffer;
-   PS_REFLECTION_OFF deliberately skips this stage.
-4. Optionally apply cascade ambient occlusion from t10.
-5. Underwater mode reconstructs the water intersection, samples animated water
-   normals/height, and evaluates the selected distance/vertical fog record.
-6. Composite lit diffuse, emissive/material contribution, reflection and fog;
-   write RGB to target 0 and the recovered depth/history scalar to target 1.
-
-The executable section is kept instruction-ordered because the reflection and
-fog reductions expose legacy FXC contraction choices at render-target precision.
-*/
-"""
-
 
 def apply_post_composition_recipe(
     staging: Path,
@@ -42,21 +18,6 @@ def apply_post_composition_recipe(
     ]
     if len(shaders) != 24 or any(shader["stage"] != "pixel" for shader in shaders):
         return None
-    definitions = {shader["selector"]: shader["defines"] for shader in shaders}
-    expanded = module_variants(
-        (staging / "hlsl" / "post_composition.hlsl").read_text(encoding="utf-8"),
-        definitions,
-    )
-    # 3Dmigoto prints the source pair (branch=true, fogIndex=1) as zeros after
-    # FXC has folded the seven-register fog-struct stride into an integer AND.
-    # Recover the source-level values; FXC then recreates masks (1, 7).
-    for selector, source in expanded.items():
-        expanded[selector] = re.sub(
-            r"(r\d+\.(?:xy|yz|zw) = r\d+\.\w\w)"
-            r" \? float2\(0,0\) : 0;",
-            r"\1 ? float2(1, 1) : 0;",
-            source,
-        )
     ensure_recovered_cbuffer_include(
         staging, "post_composition", "CB_PROJECTION",
         "post_composition_projection_abi.hlsl",
@@ -65,22 +26,18 @@ def apply_post_composition_recipe(
         staging, "post_composition", "CB_PERFRAME",
         "post_composition_perframe_abi.hlsl",
     )
-    dry_body = asset("post_composition_pixel.hlsl")
+    body = asset("post_composition_pixel.hlsl")
     bodies = {}
     for shader in shaders:
         defines = set(shader["defines"])
-        if "PS_UNDER_WATER_FOG" in defines:
-            bodies[shader["selector"]] = (
-                SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
-            )
-            continue
         prefix = "".join(
             f"#define {define} 1\n"
             for define in ("ORTHO", "PS_CASCADE", "PS_REFLECTION_OFF",
-                           "PS_REFLECTION_SINGLE", "PS_REFLECTION_MULTI")
+                           "PS_REFLECTION_SINGLE", "PS_REFLECTION_MULTI",
+                           "PS_UNDER_WATER_FOG")
             if define in defines
         )
-        bodies[shader["selector"]] = prefix + dry_body
+        bodies[shader["selector"]] = prefix + body
     executions = {}
     for shader in shaders:
         defines = set(shader["defines"])
@@ -125,11 +82,11 @@ def apply_post_composition_recipe(
             "output_components": 4,
             "output_targets": 2,
         }
-        if not underwater:
-            executions[shader["selector"]].update({
-                "absolute_tolerance": 4.0e-6,
-                "ulp_tolerance": 8,
-            })
+        executions[shader["selector"]].update({
+            "absolute_tolerance": 4.0e-6,
+            "relative_tolerance": 2.0e-4 if underwater else 2.0e-7,
+            "ulp_tolerance": 8,
+        })
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_composition", bodies=bodies, executions=executions,
