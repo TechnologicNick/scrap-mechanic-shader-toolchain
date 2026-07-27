@@ -50,6 +50,14 @@ uv run sm-shaders reconstruct `
   output
 ```
 
+Semantic compilation and reflection use all logical CPUs by default and show a
+per-module `tqdm` progress bar. To cap CPU and memory use, set
+`SM_SHADERS_JOBS` before reconstruction, for example:
+
+```powershell
+$env:SM_SHADERS_JOBS = 16
+```
+
 The output path must not already exist. This prevents an old or partial corpus
 from being mistaken for the result of the current input. A successful run
 creates:

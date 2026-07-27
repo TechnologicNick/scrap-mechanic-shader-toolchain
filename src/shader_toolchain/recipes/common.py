@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+
+from tqdm import tqdm
 
 from ..compare import compare_bytecodes
 from ..hlsl import (
@@ -13,9 +18,22 @@ from ..hlsl import (
     resolve_local_includes,
 )
 from ..reflect import ShaderReflector
+from ..sbc import D3DCompiler
 
 
 PROFILES = {"vertex": "vs_5_0", "pixel": "ps_5_0", "compute": "cs_5_0"}
+
+
+def semantic_worker_count(task_count: int) -> int:
+    """Choose the bounded semantic validation pool size."""
+    configured = os.environ.get("SM_SHADERS_JOBS")
+    try:
+        requested = int(configured) if configured is not None else (os.cpu_count() or 1)
+    except ValueError as error:
+        raise RuntimeError("SM_SHADERS_JOBS must be an integer") from error
+    if requested < 1:
+        raise RuntimeError("SM_SHADERS_JOBS must be at least one")
+    return min(requested, task_count) if task_count else 0
 
 
 def asset(name: str) -> str:
@@ -114,14 +132,25 @@ def emit_validated_module(
     )
     definitions = {shader["selector"]: shader["defines"] for shader in shaders}
     expanded = module_variants(module_path.read_text(encoding="utf-8"), definitions)
-    reflector = ShaderReflector()
-    assembly_exact = 0
-    for shader in shaders:
+    tasks = []
+    for index, shader in enumerate(shaders):
         source = resolve_local_includes(
             expanded[shader["selector"]], module_path, semantic_root
         )
+        tasks.append((index, shader, source))
+
+    thread_state = threading.local()
+
+    def validate_one(
+        index: int, shader: dict[str, Any], source: str
+    ) -> tuple[int, str, dict[str, Any]]:
+        worker_compiler = getattr(thread_state, "compiler", None)
+        if worker_compiler is None:
+            worker_compiler = D3DCompiler()
+            thread_state.compiler = worker_compiler
+            thread_state.reflector = ShaderReflector()
         try:
-            candidate = compiler.compile(
+            candidate = worker_compiler.compile(
                 source, shader["entry_point"], PROFILES[shader["stage"]]
             )
         except RuntimeError as error:
@@ -130,7 +159,8 @@ def emit_validated_module(
                 f"compile: {error}"
             ) from error
         comparison, _baseline_assembly, _candidate_assembly = compare_bytecodes(
-            blobs[shader["bundle_index"]], candidate, compiler, reflector
+            blobs[shader["bundle_index"]], candidate,
+            worker_compiler, thread_state.reflector,
         )
         if not comparison["abi_compatible"]:
             changed = ", ".join(comparison["abi_differences"])
@@ -138,12 +168,34 @@ def emit_validated_module(
                 f"{recipe_name} {shader['selector']} semantic recipe changes "
                 f"runtime ABI: {changed}"
             )
+        return index, hlsl_token_sha256(source), comparison
+
+    results: list[tuple[str, dict[str, Any]] | None] = [None] * len(tasks)
+    worker_count = semantic_worker_count(len(tasks))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(validate_one, *task) for task in tasks]
+        with tqdm(
+            total=len(futures),
+            desc=f"semantic {recipe_name}",
+            unit="shader",
+            dynamic_ncols=True,
+        ) as progress:
+            for future in as_completed(futures):
+                index, fingerprint, comparison = future.result()
+                results[index] = (fingerprint, comparison)
+                progress.update()
+
+    assembly_exact = 0
+    for shader, result in zip(shaders, results, strict=True):
+        if result is None:
+            raise RuntimeError(f"{recipe_name} semantic validation result is missing")
+        fingerprint, comparison = result
         assembly_exact += int(comparison["assembly_exact"])
         shader.update(
             {
                 "semantic_recipe": recipe_name,
                 "semantic_hlsl_path": f"semantic/{recipe_name}.hlsl",
-                "semantic_hlsl_token_sha256": hlsl_token_sha256(source),
+                "semantic_hlsl_token_sha256": fingerprint,
                 "semantic_assembly_exact": comparison["assembly_exact"],
                 "semantic_abi_compatible": True,
             }

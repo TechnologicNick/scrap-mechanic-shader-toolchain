@@ -2,6 +2,7 @@
 build/
 dist/
 output/
+sm-shaders-*/
 third_party/*/build/
 *.py[cod]
 __pycache__/
