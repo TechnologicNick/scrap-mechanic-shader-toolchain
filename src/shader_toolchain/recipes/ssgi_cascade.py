@@ -293,7 +293,8 @@ _BILATERAL_DELTA = re.compile(
 )
 _BILATERAL_ACCEPT = re.compile(
     r"^\s*(?P<accepted>[A-Za-z_]\w*)\.xyzw = cmp\("
-    r"(?P<threshold>[A-Za-z_]\w*)\.(?P<threshold_lane>[xyzw])yyy "
+    r"(?P<threshold>[A-Za-z_]\w*)\.(?P<threshold_lane>[xyzw])"
+    r"(?P=threshold_lane){3} "
     r">= (?P<distance>[A-Za-z_]\w*)\.xyzw\);$"
 )
 _NORMALIZED_DELTA = re.compile(
@@ -305,20 +306,26 @@ _PLANE_SCALE = re.compile(
     r"(?P<sign>-?)(?P<normal>[A-Za-z_]\w*)\.(?P<lane>[xyzw]){4};$"
 )
 _PLANE_COMBINE = re.compile(
-    r"^\s*(?P<delta_x>[A-Za-z_]\w*)\.xyzw = "
-    r"(?P=delta_x)\.xyzw \* (?P<sign>-?)(?P<normal>[A-Za-z_]\w*)\."
+    r"^\s*(?P<combined>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<delta_x>[A-Za-z_]\w*)\.xyzw \* "
+    r"(?P<sign>-?)(?P<normal>[A-Za-z_]\w*)\."
     r"(?P<lane>[xyzw]){4} \+ (?P<delta_y>[A-Za-z_]\w*)\.xyzw;$"
 )
 _PLANE_SATURATE = re.compile(
     r"^\s*(?P<plane_weight>[A-Za-z_]\w*)\.xyzw = saturate\("
     r"(?P<delta_z>[A-Za-z_]\w*)\.xyzw \* "
     r"(?P<sign>-?)(?P<normal>[A-Za-z_]\w*)\.(?P<lane>[xyzw]){4} "
-    r"\+ (?P<delta_x>[A-Za-z_]\w*)\.xyzw\);$"
+    r"\+ (?P<combined>[A-Za-z_]\w*)\.xyzw\);$"
 )
 _BILATERAL_PRODUCT = re.compile(
     r"^\s*(?P<output>[A-Za-z_]\w*)\.xyzw = "
-    r"(?P<distance_weight>[A-Za-z_]\w*)\.xyzw \* "
-    r"(?P<plane_weight>[A-Za-z_]\w*)\.xyzw;$"
+    r"(?P<left>[A-Za-z_]\w*)\.xyzw \* "
+    r"(?P<right>[A-Za-z_]\w*)\.xyzw;$"
+)
+_BILATERAL_ACCEPTED_PRODUCT = re.compile(
+    r"^\s*(?P<output>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<weights>[A-Za-z_]\w*)\.xyzw \* "
+    r"(?P<accepted>[A-Za-z_]\w*)\.xyzw;$"
 )
 
 
@@ -367,6 +374,7 @@ def _lift_bilateral_weights(source: str) -> str:
             lines[index + 15],
         )
         product = _BILATERAL_PRODUCT.match(lines[index + 20])
+        accepted_product = _BILATERAL_ACCEPTED_PRODUCT.match(lines[index + 21])
         if (
             normalized_x is None
             or normalized_y is None
@@ -381,18 +389,20 @@ def _lift_bilateral_weights(source: str) -> str:
             or plane_y.group("delta") != delta_y
             or plane_x.group("delta_x") != delta_x
             or plane_x.group("delta_y") != delta_y
-            or plane_z.group("delta_x") != delta_x
+            or plane_z.group("combined") != plane_x.group("combined")
             or plane_z.group("delta_z") != delta_z
             or plane_x.group("normal") != plane_y.group("normal")
             or plane_z.group("normal") != plane_y.group("normal")
             or product is None
-            or product.group("plane_weight") != plane_z.group("plane_weight")
-            or product.group("distance_weight") != falloff.group("distance_weight")
-            or lines[index + 21].strip()
-            != (
-                f"{product.group('output')}.xyzw = "
-                f"{product.group('output')}.xyzw * {accepted}.xyzw;"
-            )
+            or accepted_product is None
+            or {
+                product.group("left"), product.group("right")
+            } != {
+                plane_z.group("plane_weight"),
+                falloff.group("distance_weight"),
+            }
+            or accepted_product.group("weights") != product.group("output")
+            or accepted_product.group("accepted") != accepted
         ):
             lifted.append(lines[index])
             index += 1
@@ -402,7 +412,7 @@ def _lift_bilateral_weights(source: str) -> str:
             f"{accept_match.group('threshold_lane')}"
         )
         normal = plane_y.group("normal")
-        output = product.group("output")
+        output = accepted_product.group("output")
         def plane_component(match: re.Match[str]) -> str:
             return f"{match.group('sign')}{normal}.{match.group('lane')}"
         indent = start.group("indent")
@@ -421,6 +431,327 @@ def _lift_bilateral_weights(source: str) -> str:
         )
         index += 22
     return "\n".join(lifted) + "\n"
+
+
+_GATHER_INDIRECT = re.compile(
+    r"^(?P<indent>\s*)(?P<indirect>[A-Za-z_]\w*)\.xyzw = "
+    r"tSsgi\.Gather\(PointClampClamp_s, "
+    r"(?P<uv>[A-Za-z_]\w*\.[xyzw]{2})\)\.xyzw;$"
+)
+_GATHER_DEPTH = re.compile(
+    r"^\s*(?P<depth>[A-Za-z_]\w*)\.xyzw = "
+    r"tSsgi\.GatherGreen\(PointClampClamp_s, "
+    r"(?P<uv>[A-Za-z_]\w*\.[xyzw]{2})\)\.xyzw;$"
+)
+_DEPTH_SCALE = re.compile(
+    r"^\s*(?P<depth>[A-Za-z_]\w*)\.xyzw = (?P=depth)\.xyzw \* "
+    r"(?P<scale>[A-Za-z_]\w*\.(?P<lane>[xyzw]))(?P=lane){3} \+ "
+    r"float4\(0\.100000001,0\.100000001,0\.100000001,0\.100000001\);$"
+)
+_POSITION_DELTA = re.compile(
+    r"^\s*(?P<output>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<ray>[A-Za-z_]\w*\.(?P<ray_lane>[xyzw]))(?P=ray_lane){3} \* "
+    r"(?P<depth>[A-Za-z_]\w*)\.xyzw \+ "
+    r"-(?P<center>[A-Za-z_]\w*\.(?P<center_lane>[xyzw]))"
+    r"(?P=center_lane){3};$"
+)
+_DEPTH_DELTA = re.compile(
+    r"^\s*(?P<output>[A-Za-z_]\w*)\.xyzw = "
+    r"-(?P<depth>[A-Za-z_]\w*)\.xyzw \+ "
+    r"-(?P<center>[A-Za-z_]\w*\.(?P<center_lane>[xyzw]))"
+    r"(?P=center_lane){3};$"
+)
+_BILATERAL_CALL = re.compile(
+    r"^\s*(?P<weights>[A-Za-z_]\w*)\.xyzw = "
+    r"ComputeCascadeBilateralWeights\(\n"
+    r"\s*(?P<delta_x>[A-Za-z_]\w*)\.xyzw, "
+    r"(?P<delta_y>[A-Za-z_]\w*)\.xyzw, "
+    r"(?P<delta_z>[A-Za-z_]\w*)\.xyzw,\n"
+    r"\s*(?P<plane_x>-?[A-Za-z_]\w*\.[xyzw]), "
+    r"(?P<plane_y>-?[A-Za-z_]\w*\.[xyzw]), "
+    r"(?P<plane_z>-?[A-Za-z_]\w*\.[xyzw]),\n"
+    r"\s*(?P<rejection>[A-Za-z_]\w*\.[xyzw]), "
+    r"(?P<falloff>[A-Za-z_]\w*\.[xyzw])\);$"
+)
+_PACK_GATHER = re.compile(
+    r"^\s*(?P<packed>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<indirect>[A-Za-z_]\w*)\.xyzw \* "
+    r"float4\(65535,65535,65535,65535\) \+ "
+    r"float4\(0\.5,0\.5,0\.5,0\.5\);$"
+)
+_CAST_PACKED_GATHER = re.compile(
+    r"^\s*(?P<packed>[A-Za-z_]\w*)\.xyzw = "
+    r"\(uint4\)(?P=packed)\.xyzw;$"
+)
+_RESOLVE_NEIGHBORHOOD = re.compile(
+    r"^\s*CascadeContribution (?P<contribution>[A-Za-z_]\w*) = "
+    r"ResolveCascadeContribution\(\n"
+    r"\s*\(uint4\)(?P<packed>[A-Za-z_]\w*), "
+    r"(?P<weights>[A-Za-z_]\w*)\.xyzw\);$"
+)
+
+
+def _lift_cascade_neighborhood_gathers(source: str) -> str:
+    """Recover each Gather/depth/bilateral/decode operation as one call."""
+    lines = source.splitlines()
+    lifted: list[str] = []
+    context_signature: tuple[str, ...] | None = None
+    context_name = "cascadeFilterContext"
+    neighborhood_index = 0
+    index = 0
+    while index < len(lines):
+        gather = _GATHER_INDIRECT.match(lines[index])
+        depth_gather = (
+            _GATHER_DEPTH.match(lines[index + 1])
+            if gather is not None and index + 1 < len(lines)
+            else None
+        )
+        if (
+            gather is None
+            or depth_gather is None
+            or depth_gather.group("uv") != gather.group("uv")
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        depth = depth_gather.group("depth")
+        if (
+            index + 3 >= len(lines)
+            or lines[index + 2].strip()
+            != f"{depth}.xyzw = {depth}.xyzw * {depth}.xyzw;"
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        marker = next(
+            (
+                candidate
+                for candidate in range(index + 4, min(index + 16, len(lines)))
+                if lines[candidate].strip()
+                == "// Plane- and distance-aware neighborhood rejection."
+            ),
+            None,
+        )
+        if marker is None or marker < index + 7:
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        scale_line = next(
+            (
+                candidate
+                for candidate in range(index + 3, marker - 2)
+                if _DEPTH_SCALE.match(lines[candidate]) is not None
+            ),
+            None,
+        )
+        if scale_line is None:
+            lifted.append(lines[index])
+            index += 1
+            continue
+        scale = _DEPTH_SCALE.match(lines[scale_line])
+        delta_x = _POSITION_DELTA.match(lines[marker - 3])
+        delta_y = _POSITION_DELTA.match(lines[marker - 2])
+        delta_z = _DEPTH_DELTA.match(lines[marker - 1])
+        if (
+            scale is None
+            or delta_x is None
+            or delta_y is None
+            or delta_z is None
+            or scale.group("depth") != depth
+            or any(
+                delta.group("depth") != depth
+                for delta in (delta_x, delta_y, delta_z)
+            )
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        call_end = marker + 4
+        if call_end + 4 >= len(lines):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        bilateral = _BILATERAL_CALL.match("\n".join(lines[marker + 1 : call_end + 1]))
+        packed = _PACK_GATHER.match(lines[call_end + 1])
+        cast = _CAST_PACKED_GATHER.match(lines[call_end + 2])
+        resolve = _RESOLVE_NEIGHBORHOOD.match(
+            "\n".join(lines[call_end + 3 : call_end + 5])
+        )
+        if (
+            bilateral is None
+            or packed is None
+            or cast is None
+            or resolve is None
+            or packed.group("indirect") != gather.group("indirect")
+            or cast.group("packed") != packed.group("packed")
+            or resolve.group("packed") != packed.group("packed")
+            or resolve.group("weights") != bilateral.group("weights")
+            or bilateral.group("delta_x") != delta_x.group("output")
+            or bilateral.group("delta_y") != delta_y.group("output")
+            or bilateral.group("delta_z") != delta_z.group("output")
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        centers = (
+            delta_x.group("center"),
+            delta_y.group("center"),
+            delta_z.group("center"),
+        )
+        signature = (
+            *centers,
+            scale.group("scale"),
+            bilateral.group("plane_x"),
+            bilateral.group("plane_y"),
+            bilateral.group("plane_z"),
+            bilateral.group("rejection"),
+            bilateral.group("falloff"),
+        )
+        if context_signature is not None and signature != context_signature:
+            lifted.append(lines[index])
+            index += 1
+            continue
+        indent = gather.group("indent")
+        setup = [
+            *lines[index + 3 : scale_line],
+            *lines[scale_line + 1 : marker - 3],
+        ]
+        uv = gather.group("uv")
+        if setup:
+            saved_uv = f"cascadeNeighborhoodUv{neighborhood_index}"
+            lifted.append(f"{indent}float2 {saved_uv} = {uv};")
+            uv = saved_uv
+            lifted.extend(setup)
+
+        if context_signature is None:
+            context_signature = signature
+            lifted.append(f"{indent}CascadeFilterContext {context_name};")
+            lifted.append(
+                f"{indent}{context_name}.centerPosition = float3("
+                f"{centers[0]}, {centers[1]}, {centers[2]});"
+            )
+            lifted.append(
+                f"{indent}{context_name}.depthScale = {scale.group('scale')};"
+            )
+            lifted.append(
+                f"{indent}{context_name}.planeScale = float3("
+                f"{bilateral.group('plane_x')}, {bilateral.group('plane_y')}, "
+                f"{bilateral.group('plane_z')});"
+            )
+            lifted.append(
+                f"{indent}{context_name}.rejectionDistance = "
+                f"{bilateral.group('rejection')};"
+            )
+            lifted.append(
+                f"{indent}{context_name}.inverseFalloffDistance = "
+                f"{bilateral.group('falloff')};"
+            )
+        contribution = resolve.group("contribution")
+        lifted.append(
+            f"{indent}CascadeContribution {contribution} = "
+            "GatherCascadeNeighborhood("
+        )
+        lifted.append(
+            f"{indent}    tSsgi, PointClampClamp_s, {uv},"
+        )
+        lifted.append(
+            f"{indent}    {delta_x.group('ray')}"
+            f"{delta_x.group('ray_lane') * 3}, "
+            f"{delta_y.group('ray')}"
+            f"{delta_y.group('ray_lane') * 3}, {context_name});"
+        )
+        neighborhood_index += 1
+        index = call_end + 5
+    return "\n".join(lifted) + "\n"
+
+
+_CONTRIBUTION_ASSIGNMENT = re.compile(
+    r"^(?P<indent>\s*)(?P<destination>[A-Za-z_]\w*\.[xyzw]{1,3}) = "
+    r"(?P<left>[^;]+) \+ (?P<right>[^;]+);$"
+)
+
+
+def _lift_cascade_accumulations(source: str) -> str:
+    """Name the repeated weight/indirect accumulation between neighborhood taps."""
+    lines = source.splitlines()
+    lifted: list[str] = []
+    index = 0
+    while index < len(lines):
+        weight = _CONTRIBUTION_ASSIGNMENT.match(lines[index])
+        indirect = (
+            _CONTRIBUTION_ASSIGNMENT.match(lines[index + 1])
+            if weight is not None and index + 1 < len(lines)
+            else None
+        )
+        if weight is None or indirect is None:
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        weight_destination = weight.group("destination")
+        indirect_destination = indirect.group("destination")
+        weight_terms = {weight.group("left"), weight.group("right")}
+        indirect_terms = {indirect.group("left"), indirect.group("right")}
+        contribution_terms = [
+            term.removesuffix(".weight")
+            for term in weight_terms
+            if term.endswith(".weight")
+        ]
+        if len(contribution_terms) != 1:
+            lifted.append(lines[index])
+            index += 1
+            continue
+        contribution = contribution_terms[0]
+        if (
+            weight_destination not in weight_terms
+            or indirect_destination not in indirect_terms
+            or f"{contribution}.indirect" not in indirect_terms
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+
+        indent = weight.group("indent")
+        lifted.append(f"{indent}AccumulateCascadeContribution(")
+        lifted.append(
+            f"{indent}    {weight_destination}, {indirect_destination}, "
+            f"{contribution});"
+        )
+        index += 2
+    return "\n".join(lifted) + "\n"
+
+
+_NEIGHBORHOOD_DIRECTIONS = (
+    "northWest",
+    "north",
+    "northEast",
+    "west",
+    "east",
+    "southWest",
+    "south",
+    "southEast",
+)
+
+
+def _name_cascade_neighborhoods(source: str) -> str:
+    """Expose the recovered clockwise 3x3 perimeter traversal."""
+    for index, direction in enumerate(_NEIGHBORHOOD_DIRECTIONS):
+        source = re.sub(
+            rf"\bfilteredNeighborhood{index + 1}\b",
+            f"{direction}Contribution",
+            source,
+        )
+        source = re.sub(
+            rf"\bcascadeNeighborhoodUv{index}\b",
+            f"{direction}Uv",
+            source,
+        )
+    return source
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -511,10 +842,16 @@ def apply_ssgi_cascade_recipe(
             f"  {marker}",
             1,
         )
-        variants[selector] = _lift_bilateral_weights(
-            _lift_packed_indirect_encodes(
-                _lift_cascade_quad_contributions(
-                    _lift_packed_indirect_decodes(source)
+        variants[selector] = _name_cascade_neighborhoods(
+            _lift_cascade_accumulations(
+                _lift_cascade_neighborhood_gathers(
+                    _lift_bilateral_weights(
+                        _lift_packed_indirect_encodes(
+                            _lift_cascade_quad_contributions(
+                                _lift_packed_indirect_decodes(source)
+                            )
+                        )
+                    )
                 )
             )
         )

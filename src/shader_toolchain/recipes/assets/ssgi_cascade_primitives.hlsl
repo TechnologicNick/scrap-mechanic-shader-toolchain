@@ -22,6 +22,15 @@ struct CascadeContribution
   float weight;
 };
 
+struct CascadeFilterContext
+{
+  float3 centerPosition;
+  float depthScale;
+  float3 planeScale;
+  float rejectionDistance;
+  float inverseFalloffDistance;
+};
+
 float DecodeCascadeDepth(float encodedDepth, float maximumDepth)
 {
   float decodedDepth = encodedDepth * encodedDepth;
@@ -102,6 +111,16 @@ CascadeContribution ResolveCascadeContribution(
   return result;
 }
 
+void AccumulateCascadeContribution(
+    inout float accumulatedWeight,
+    inout float3 accumulatedIndirect,
+    CascadeContribution contribution)
+{
+  // SM_COVERAGE_CANARY: cascade_accumulate
+  accumulatedWeight = accumulatedWeight + contribution.weight;
+  accumulatedIndirect = contribution.indirect + accumulatedIndirect;
+}
+
 float EncodeCascadeIndirect(float3 indirect)
 {
   // SM_COVERAGE_CANARY: packed_encode
@@ -173,6 +192,35 @@ float4 ComputeCascadeBilateralWeights(
               + float4(1.0, 1.0, 1.0, 1.0);
   distanceWeight = distanceWeight * distanceWeight;
   return distanceWeight * planeWeight * accepted;
+}
+
+CascadeContribution GatherCascadeNeighborhood(
+    Texture2D<float2> cascadeTexture,
+    SamplerState pointSampler,
+    float2 uv,
+    float4 viewRayX,
+    float4 viewRayY,
+    CascadeFilterContext context)
+{
+  float4 encodedIndirect = cascadeTexture.Gather(pointSampler, uv);
+  float4 depth = cascadeTexture.GatherGreen(pointSampler, uv);
+  depth = depth * depth;
+  depth = depth * context.depthScale
+        + float4(0.100000001, 0.100000001,
+                 0.100000001, 0.100000001);
+
+  float4 deltaX = viewRayX * depth + -context.centerPosition.xxxx;
+  float4 deltaY = viewRayY * depth + -context.centerPosition.yyyy;
+  float4 deltaZ = -depth + -context.centerPosition.zzzz;
+  float4 weights = ComputeCascadeBilateralWeights(
+      deltaX, deltaY, deltaZ,
+      context.planeScale.x, context.planeScale.y, context.planeScale.z,
+      context.rejectionDistance, context.inverseFalloffDistance);
+
+  encodedIndirect = encodedIndirect * float4(
+      CASCADE_PACK_SCALE, CASCADE_PACK_SCALE,
+      CASCADE_PACK_SCALE, CASCADE_PACK_SCALE) + float4(0.5, 0.5, 0.5, 0.5);
+  return ResolveCascadeContribution((uint4)encodedIndirect, weights);
 }
 
 float3 ReconstructCascadeViewPosition(
