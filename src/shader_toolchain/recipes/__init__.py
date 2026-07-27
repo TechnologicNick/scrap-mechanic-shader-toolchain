@@ -72,6 +72,7 @@ from .save_paused import apply_save_paused_recipe
 from .upres_clouds import apply_upres_clouds_recipe
 from .ssgi_prepass import apply_ssgi_prepass_recipe
 from .ssgi_denoise import apply_ssgi_denoise_recipe
+from .ssgi_cascade import apply_ssgi_cascade_recipe
 
 
 RECIPES = (
@@ -143,6 +144,7 @@ RECIPES = (
     apply_post_volumetric_recipe,
     apply_ssgi_prepass_recipe,
     apply_ssgi_denoise_recipe,
+    apply_ssgi_cascade_recipe,
     apply_cmp_normal_mips_recipe,
     apply_post_depth_to_pushmap_recipe,
     apply_cmp_update_reflection_recipe,

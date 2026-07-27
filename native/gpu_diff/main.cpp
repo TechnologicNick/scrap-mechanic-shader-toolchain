@@ -113,6 +113,7 @@ struct Options {
     uint32_t ulp_tolerance = 0;
     std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
     std::vector<uint32_t> smooth_texture_slots;
+    std::vector<uint32_t> monochrome_texture_slots;
     std::vector<StructuredInputBinding> structured_inputs;
     uint32_t structured_output_elements = 0;
     uint32_t structured_output_stride = sizeof(uint32_t);
@@ -407,6 +408,16 @@ Options parse_options(int argc, char** argv) {
             while (std::getline(slots, slot, ',')) {
                 if (!slot.empty()) {
                     options.smooth_texture_slots.push_back(
+                        static_cast<uint32_t>(parse_u64(slot)));
+                }
+            }
+        } else if (name == "--monochrome-texture-slots") {
+            options.monochrome_texture_slots.clear();
+            std::stringstream slots(value());
+            std::string slot;
+            while (std::getline(slots, slot, ',')) {
+                if (!slot.empty()) {
+                    options.monochrome_texture_slots.push_back(
                         static_cast<uint32_t>(parse_u64(slot)));
                 }
             }
@@ -1848,6 +1859,19 @@ int main(int argc, char** argv) {
                         random);
                 if (resource == 0) {
                     pattern = resource_pattern;
+                }
+                const bool monochrome = std::find(
+                    options.monochrome_texture_slots.begin(),
+                    options.monochrome_texture_slots.end(),
+                    options.textures[resource].slot)
+                    != options.monochrome_texture_slots.end();
+                if (monochrome) {
+                    for (size_t component = 0; component < inputs[resource].size();
+                         component += 4) {
+                        inputs[resource][component + 1] = inputs[resource][component];
+                        inputs[resource][component + 2] = inputs[resource][component];
+                        inputs[resource][component + 3] = inputs[resource][component];
+                    }
                 }
                 runner.update_input(resource, inputs[resource]);
             }

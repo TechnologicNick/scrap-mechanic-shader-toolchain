@@ -735,6 +735,7 @@ def _invoke_harness(
     texture_mips: list[int],
     texture_slices: list[int],
     smooth_texture_slots: list[int],
+    monochrome_texture_slots: list[int],
     structured_inputs: list[dict[str, int]],
     structured_output_elements: int,
     structured_output_stride: int,
@@ -792,6 +793,8 @@ def _invoke_harness(
         ),
         "--smooth-texture-slots",
         ",".join(str(slot) for slot in smooth_texture_slots),
+        "--monochrome-texture-slots",
+        ",".join(str(slot) for slot in monochrome_texture_slots),
         "--structured-output-elements",
         str(structured_output_elements),
         "--structured-output-stride",
@@ -930,6 +933,9 @@ def fuzz_semantic_shader(
     ]
     smooth_texture_slots = [
         int(slot) for slot in execution.get("smooth_texture_slots", [])
+    ]
+    monochrome_texture_slots = [
+        int(slot) for slot in execution.get("monochrome_texture_slots", [])
     ]
     if len(texture_slices) != len(texture_slots) or any(
         slices < 1 or slices > 2048 for slices in texture_slices
@@ -1103,6 +1109,7 @@ def fuzz_semantic_shader(
             texture_mips=texture_mips,
             texture_slices=texture_slices,
             smooth_texture_slots=smooth_texture_slots,
+            monochrome_texture_slots=monochrome_texture_slots,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -1140,6 +1147,7 @@ def fuzz_semantic_shader(
             texture_mips=texture_mips,
             texture_slices=texture_slices,
             smooth_texture_slots=smooth_texture_slots,
+            monochrome_texture_slots=monochrome_texture_slots,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -1168,6 +1176,7 @@ def fuzz_semantic_shader(
             "texture_mips": texture_mips,
             "texture_slices": texture_slices,
             "smooth_texture_slots": smooth_texture_slots,
+            "monochrome_texture_slots": monochrome_texture_slots,
             "structured_inputs": structured_inputs,
             "structured_output_elements": structured_output_elements,
             "structured_output_stride": structured_output_stride,
