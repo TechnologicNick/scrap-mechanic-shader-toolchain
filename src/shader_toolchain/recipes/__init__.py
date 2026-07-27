@@ -28,6 +28,7 @@ from .copy_depth_rect_to_color import apply_copy_depth_rect_to_color_recipe
 from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
 from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
+from .copy_lut_brightness import apply_copy_lut_brightness_recipe
 from .cube_map_face_present import apply_cube_map_face_present_recipe
 from .cube_map_blend import apply_cube_map_blend_recipe
 from .cube_map_composition import apply_cube_map_composition_recipe
@@ -84,6 +85,7 @@ RECIPES = (
     apply_gui_silhouette_recipe,
     apply_gui_blurry_background_recipe,
     apply_copy_to_shadow_atlas_recipe,
+    apply_copy_lut_brightness_recipe,
     apply_gui_texture_3d_recipe,
     apply_gui_texture_box_array_recipe,
     apply_indirect_temporal_recipe,

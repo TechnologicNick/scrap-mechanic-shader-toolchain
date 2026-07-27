@@ -545,7 +545,9 @@ def _invoke_harness(
         ),
         "--samplers",
         ",".join(
-            f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
+            f"{sampler['slot']}:{sampler['filter']}"
+            + (":comparison" if sampler.get("comparison", False) else "")
+            for sampler in samplers
         ),
         "--constant-buffers",
         ",".join(
@@ -594,13 +596,15 @@ def fuzz_semantic_shader(
     failure_dir: Path | None = None,
     harness: Path | None = None,
     warp: bool = False,
+    verify_corpus: bool = True,
 ) -> dict[str, Any]:
     """Compile a semantic pixel or compute shader and compare exact GPU output."""
     if cases < 1 or width < 1 or height < 1:
         raise ToolchainError("cases, width, and height must be positive")
     if absolute_tolerance < 0 or relative_tolerance < 0:
         raise ToolchainError("comparison tolerances must be non-negative")
-    verify_output(corpus, verify_hlsl_fingerprints=False)
+    if verify_corpus:
+        verify_output(corpus, verify_hlsl_fingerprints=False)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     semantic_compute = [
         shader
@@ -709,7 +713,11 @@ def fuzz_semantic_shader(
         ],
     )
     samplers = [
-        {"slot": int(sampler["slot"]), "filter": str(sampler["filter"])}
+        {
+            "slot": int(sampler["slot"]),
+            "filter": str(sampler["filter"]),
+            "comparison": bool(sampler.get("comparison", False)),
+        }
         for sampler in samplers
     ]
     constant_buffers = execution.get(

@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuzz_parser.add_argument("--harness", type=Path)
     fuzz_parser.add_argument("--warp", action="store_true")
+    fuzz_parser.add_argument(
+        "--skip-corpus-verification",
+        action="store_true",
+        help="skip corpus verification when a trusted parent process already ran it",
+    )
     fuzz_parser.add_argument("--report", type=Path)
     return parser
 
@@ -141,6 +146,7 @@ def main() -> int:
                 failure_dir=args.failure_dir,
                 harness=args.harness,
                 warp=args.warp,
+                verify_corpus=not args.skip_corpus_verification,
             )
             rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
             if args.report:

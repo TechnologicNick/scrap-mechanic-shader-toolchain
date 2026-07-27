@@ -41,6 +41,12 @@ struct ConstantBinding {
     ConstantProfile profile;
 };
 
+struct SamplerBinding {
+    uint32_t slot;
+    bool point;
+    bool comparison = false;
+};
+
 enum class TextureKind {
     two_d,
     three_d,
@@ -98,7 +104,7 @@ struct Options {
     uint32_t structured_output_elements = 0;
     uint32_t structured_output_stride = sizeof(uint32_t);
     std::vector<StructuredOutputBinding> structured_outputs;
-    std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
+    std::vector<SamplerBinding> samplers = {{6, false, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
     bool depth_output = false;
@@ -390,7 +396,7 @@ Options parse_options(int argc, char** argv) {
                 });
             }
         } else if (name == "--sampler-slot") {
-            options.samplers.front().first =
+            options.samplers.front().slot =
                 static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--samplers") {
             options.samplers.clear();
@@ -400,16 +406,25 @@ Options parse_options(int argc, char** argv) {
                 const size_t separator = sampler.find(':');
                 if (separator == std::string::npos) {
                     throw std::runtime_error(
-                        "samplers must use slot:point or slot:linear");
+                        "samplers must use slot:point[:comparison] or slot:linear[:comparison]");
                 }
                 const uint32_t slot = static_cast<uint32_t>(
                     parse_u64(sampler.substr(0, separator)));
-                const std::string filter = sampler.substr(separator + 1);
+                const size_t second = sampler.find(':', separator + 1);
+                const std::string filter = sampler.substr(
+                    separator + 1, second == std::string::npos
+                        ? std::string::npos : second - separator - 1);
                 if (filter != "point" && filter != "linear") {
                     throw std::runtime_error(
                         "sampler filter must be point or linear");
                 }
-                options.samplers.emplace_back(slot, filter == "point");
+                const bool comparison = second != std::string::npos
+                    && sampler.substr(second + 1) == "comparison";
+                if (second != std::string::npos && !comparison) {
+                    throw std::runtime_error(
+                        "sampler mode must be comparison");
+                }
+                options.samplers.push_back({slot, filter == "point", comparison});
             }
         } else if (name == "--constant-buffer-slot") {
             options.constant_buffers.front().slot =
@@ -437,11 +452,11 @@ Options parse_options(int argc, char** argv) {
         } else if (name == "--filter") {
             const std::string filter = value();
             if (filter == "point") {
-                options.samplers.front().second = true;
+                options.samplers.front().point = true;
             } else if (filter != "linear") {
                 throw std::runtime_error("filter must be point or linear");
             } else {
-                options.samplers.front().second = false;
+                options.samplers.front().point = false;
             }
         } else if (name == "--output") {
             const std::string output = value();
@@ -552,7 +567,7 @@ Options parse_options(int argc, char** argv) {
             options.samplers.begin(),
             options.samplers.end(),
             [](const auto& sampler) {
-                return sampler.first >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
+                return sampler.slot >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
             })
         || std::any_of(
             options.constant_buffers.begin(),
@@ -1255,16 +1270,20 @@ private:
             constant_buffers_.push_back(std::move(buffer));
         }
 
-        for (const auto& [slot, point] : options_.samplers) {
-            static_cast<void>(slot);
+        for (const SamplerBinding& binding : options_.samplers) {
             D3D11_SAMPLER_DESC sampler_description{};
-            sampler_description.Filter = point
-                ? D3D11_FILTER_MIN_MAG_MIP_POINT
-                : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler_description.Filter = binding.comparison
+                ? (binding.point
+                    ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                    : D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR)
+                : (binding.point
+                    ? D3D11_FILTER_MIN_MAG_MIP_POINT
+                    : D3D11_FILTER_MIN_MAG_MIP_LINEAR);
             sampler_description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
             sampler_description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
             sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
             sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
+            sampler_description.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
             ComPtr<ID3D11SamplerState> sampler;
             check(
                 device_->CreateSamplerState(&sampler_description, &sampler),
@@ -1325,9 +1344,9 @@ private:
         for (size_t index = 0; index < options_.samplers.size(); ++index) {
             ID3D11SamplerState* sampler = samplers_[index].Get();
             context_->PSSetSamplers(
-                options_.samplers[index].first, 1, &sampler);
+                options_.samplers[index].slot, 1, &sampler);
             context_->CSSetSamplers(
-                options_.samplers[index].first, 1, &sampler);
+                options_.samplers[index].slot, 1, &sampler);
         }
         if (options_.stage == ShaderStage::compute) {
             return;
@@ -1767,10 +1786,12 @@ int main(int argc, char** argv) {
             if (index != 0) {
                 std::cout << ", ";
             }
-            std::cout << "{\"slot\": " << options.samplers[index].first
+            std::cout << "{\"slot\": " << options.samplers[index].slot
                       << ", \"filter\": \""
-                      << (options.samplers[index].second ? "point" : "linear")
-                      << "\"}";
+                      << (options.samplers[index].point ? "point" : "linear")
+                      << "\", \"comparison\": "
+                      << (options.samplers[index].comparison ? "true" : "false")
+                      << "}";
         }
         std::cout << "],\n"
                   << "  \"constant_buffers\": [";
