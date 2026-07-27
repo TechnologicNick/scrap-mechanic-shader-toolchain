@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -32,6 +32,22 @@ Lighting and animation blocks remain instruction-ordered to preserve packed
 indices, comparison gathers, approximate normalization, and DXBC contraction.
 */
 """
+
+
+REGISTER_NAMES_BY_MODULE = {
+    "main_character": {
+        0: "characterPositionState", 1: "skinWeightState",
+        2: "boneTransformState", 3: "viewProjectionState",
+        4: "normalAndTangentState", 5: "effectAnimationState",
+        6: "materialSampleState", 7: "profileMaterialState",
+        8: "clusterMaskState", 9: "lightIteratorState",
+        10: "lightGeometryState", 11: "attenuationAndCookieState",
+        12: "shadowState", 13: "reflectionAndRefractionState",
+        14: "forwardLightAccumulator", 15: "transmissionState",
+        16: "gbufferAndPreviewState", 17: "effectOutputState",
+        18: "characterScratch",
+    },
+}
 
 
 def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
@@ -226,6 +242,12 @@ def apply_character_material_recipe(
             source = re.sub(
                 r"out float ([op]\d+) : CUTOFF0",
                 r"out nointerpolation float \1 : CUTOFF0", source,
+            )
+        names = REGISTER_NAMES_BY_MODULE.get(source_name)
+        if names is not None:
+            source = rename_register_state(
+                source, names,
+                note="Skinning, effects, and material lighting retain DXBC order.",
             )
         expanded[selector] = source
     bodies = {
