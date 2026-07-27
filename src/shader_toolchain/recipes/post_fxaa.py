@@ -60,6 +60,9 @@ def apply_post_fxaa_recipe(
     )
 
     definitions = {shader["selector"]: shader["defines"] for shader in shaders}
+    vertex_selector = next(
+        shader["selector"] for shader in shaders if shader["stage"] == "vertex"
+    )
     expanded = module_variants(module_path.read_text(encoding="utf-8"), definitions)
     reflector = ShaderReflector()
     for shader in shaders:
@@ -84,4 +87,13 @@ def apply_post_fxaa_recipe(
                 "semantic_abi_compatible": True,
             }
         )
+        if shader["stage"] == "pixel":
+            shader["semantic_execution"] = {
+                "kind": "fullscreen_texture2d",
+                "vertex_selector": vertex_selector,
+                "texture_slot": 0,
+                "sampler_slot": 6,
+                "constant_buffer_slot": 5,
+                "filter": "linear",
+            }
     return {"name": "post_fxaa", "shader_count": len(shaders)}

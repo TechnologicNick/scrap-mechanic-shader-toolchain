@@ -40,3 +40,21 @@ def test_select_shader_pair_rejects_missing_semantic_pixel() -> None:
 
     with pytest.raises(ToolchainError, match="exactly one semantic pixel"):
         select_shader_pair(manifest, "post_fxaa")
+
+
+def test_select_shader_pair_selects_pixel_permutation() -> None:
+    manifest = manifest_with_fxaa()
+    manifest["shaders"].append(
+        {
+            "source_name": "post_fxaa",
+            "stage": "pixel",
+            "selector": "SM_SHADER_SECOND_PIXEL",
+            "semantic_hlsl_path": "semantic/post_fxaa.hlsl",
+        }
+    )
+
+    _vertex, pixel = select_shader_pair(
+        manifest, "post_fxaa", "SM_SHADER_SECOND_PIXEL"
+    )
+
+    assert pixel["selector"] == "SM_SHADER_SECOND_PIXEL"

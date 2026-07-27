@@ -71,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuzz_parser.add_argument("corpus", type=Path)
     fuzz_parser.add_argument("--shader", default="post_fxaa", dest="source_name")
+    fuzz_parser.add_argument("--selector", dest="pixel_selector")
     fuzz_parser.add_argument("--cases", type=int, default=256)
     fuzz_parser.add_argument(
         "--seed", type=lambda value: int(value, 0), default=0x534D465841413031
@@ -130,6 +131,7 @@ def main() -> int:
             report = fuzz_semantic_shader(
                 args.corpus,
                 source_name=args.source_name,
+                pixel_selector=args.pixel_selector,
                 cases=args.cases,
                 seed=args.seed,
                 width=args.width,

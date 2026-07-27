@@ -32,6 +32,10 @@ struct Options {
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
+    uint32_t texture_slot = 0;
+    uint32_t sampler_slot = 6;
+    uint32_t constant_buffer_slot = 5;
+    bool point_filter = false;
     bool warp = false;
 };
 
@@ -139,6 +143,19 @@ Options parse_options(int argc, char** argv) {
             options.absolute_tolerance = parse_double(value());
         } else if (name == "--relative-tolerance") {
             options.relative_tolerance = parse_double(value());
+        } else if (name == "--texture-slot") {
+            options.texture_slot = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--sampler-slot") {
+            options.sampler_slot = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--constant-buffer-slot") {
+            options.constant_buffer_slot = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--filter") {
+            const std::string filter = value();
+            if (filter == "point") {
+                options.point_filter = true;
+            } else if (filter != "linear") {
+                throw std::runtime_error("filter must be point or linear");
+            }
         } else if (name == "--warp") {
             options.warp = true;
         } else {
@@ -153,6 +170,11 @@ Options parse_options(int argc, char** argv) {
     }
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
+    }
+    if (options.texture_slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
+        || options.sampler_slot >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
+        || options.constant_buffer_slot >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) {
+        throw std::runtime_error("resource binding slot is out of range");
     }
     return options;
 }
@@ -343,7 +365,9 @@ private:
             "CreateBuffer");
 
         D3D11_SAMPLER_DESC sampler_description{};
-        sampler_description.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler_description.Filter = options_.point_filter
+            ? D3D11_FILTER_MIN_MAG_MIP_POINT
+            : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         sampler_description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
         sampler_description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
         sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -371,10 +395,12 @@ private:
         ID3D11RenderTargetView* target = render_target_view_.Get();
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
-        context_->VSSetConstantBuffers(5, 1, &constant_buffer);
-        context_->PSSetConstantBuffers(5, 1, &constant_buffer);
-        context_->PSSetShaderResources(0, 1, &input_view);
-        context_->PSSetSamplers(6, 1, &sampler);
+        context_->VSSetConstantBuffers(
+            options_.constant_buffer_slot, 1, &constant_buffer);
+        context_->PSSetConstantBuffers(
+            options_.constant_buffer_slot, 1, &constant_buffer);
+        context_->PSSetShaderResources(options_.texture_slot, 1, &input_view);
+        context_->PSSetSamplers(options_.sampler_slot, 1, &sampler);
         context_->RSSetState(rasterizer_state_.Get());
         context_->RSSetViewports(1, &viewport);
         context_->OMSetRenderTargets(1, &target, nullptr);
@@ -676,6 +702,12 @@ int main(int argc, char** argv) {
                   << "  \"height\": " << options.height << ",\n"
                   << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
                   << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+                  << "  \"texture_slot\": " << options.texture_slot << ",\n"
+                  << "  \"sampler_slot\": " << options.sampler_slot << ",\n"
+                  << "  \"constant_buffer_slot\": "
+                  << options.constant_buffer_slot << ",\n"
+                  << "  \"filter\": \""
+                  << (options.point_filter ? "point" : "linear") << "\",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
                   << "  \"exact_values\": " << exact_values << ",\n"
                   << "  \"max_absolute_error\": " << max_absolute_error << ",\n"

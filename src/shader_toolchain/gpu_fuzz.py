@@ -15,7 +15,7 @@ from .sbc import D3DCompiler
 
 
 def select_shader_pair(
-    manifest: dict[str, Any], source_name: str
+    manifest: dict[str, Any], source_name: str, pixel_selector: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Select the single semantic pixel shader and matching exact vertex shader."""
     shaders = [
@@ -28,12 +28,22 @@ def select_shader_pair(
         for shader in shaders
         if shader["stage"] == "pixel" and shader.get("semantic_hlsl_path")
     ]
+    if pixel_selector is not None:
+        pixels = [shader for shader in pixels if shader["selector"] == pixel_selector]
     vertices = [shader for shader in shaders if shader["stage"] == "vertex"]
     if len(pixels) != 1:
         raise ToolchainError(
             f"{source_name} needs exactly one semantic pixel variant; "
             f"found {len(pixels)}"
         )
+    execution = pixels[0].get("semantic_execution", {}) if len(pixels) == 1 else {}
+    vertex_selector = execution.get("vertex_selector")
+    if vertex_selector:
+        vertices = [
+            shader
+            for shader in manifest["shaders"]
+            if shader["selector"] == vertex_selector and shader["stage"] == "vertex"
+        ]
     if len(vertices) != 1:
         raise ToolchainError(
             f"{source_name} needs exactly one vertex variant; found {len(vertices)}"
@@ -80,6 +90,10 @@ def _invoke_harness(
     height: int,
     absolute_tolerance: float,
     relative_tolerance: float,
+    texture_slot: int,
+    sampler_slot: int,
+    constant_buffer_slot: int,
+    texture_filter: str,
     failure_dir: Path | None,
     warp: bool,
 ) -> dict[str, Any]:
@@ -103,6 +117,14 @@ def _invoke_harness(
         str(absolute_tolerance),
         "--relative-tolerance",
         str(relative_tolerance),
+        "--texture-slot",
+        str(texture_slot),
+        "--sampler-slot",
+        str(sampler_slot),
+        "--constant-buffer-slot",
+        str(constant_buffer_slot),
+        "--filter",
+        texture_filter,
     ]
     if failure_dir is not None:
         command.extend(("--failure-dir", str(failure_dir)))
@@ -125,6 +147,7 @@ def fuzz_semantic_shader(
     corpus: Path,
     *,
     source_name: str = "post_fxaa",
+    pixel_selector: str | None = None,
     cases: int = 256,
     seed: int = 0x534D465841413031,
     width: int = 64,
@@ -142,7 +165,14 @@ def fuzz_semantic_shader(
         raise ToolchainError("comparison tolerances must be non-negative")
     verify_output(corpus, verify_hlsl_fingerprints=False)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
-    vertex, pixel = select_shader_pair(manifest, source_name)
+    vertex, pixel = select_shader_pair(manifest, source_name, pixel_selector)
+    execution = pixel.get("semantic_execution", {})
+    texture_slot = int(execution.get("texture_slot", 0))
+    sampler_slot = int(execution.get("sampler_slot", 6))
+    constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
+    texture_filter = str(execution.get("filter", "linear"))
+    if texture_filter not in ("point", "linear"):
+        raise ToolchainError(f"unsupported texture filter: {texture_filter}")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
     vertex_path = corpus / vertex["dxbc_path"]
@@ -171,6 +201,10 @@ def fuzz_semantic_shader(
             height=height,
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
+            texture_slot=texture_slot,
+            sampler_slot=sampler_slot,
+            constant_buffer_slot=constant_buffer_slot,
+            texture_filter=texture_filter,
             failure_dir=None,
             warp=warp,
         )
@@ -187,6 +221,10 @@ def fuzz_semantic_shader(
             height=height,
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
+            texture_slot=texture_slot,
+            sampler_slot=sampler_slot,
+            constant_buffer_slot=constant_buffer_slot,
+            texture_filter=texture_filter,
             failure_dir=failure_dir,
             warp=warp,
         )
@@ -196,6 +234,12 @@ def fuzz_semantic_shader(
         "vertex_selector": vertex["selector"],
         "pixel_selector": pixel["selector"],
         "semantic_recipe": pixel["semantic_recipe"],
+        "semantic_execution": {
+            "texture_slot": texture_slot,
+            "sampler_slot": sampler_slot,
+            "constant_buffer_slot": constant_buffer_slot,
+            "filter": texture_filter,
+        },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),
         "control": control,
