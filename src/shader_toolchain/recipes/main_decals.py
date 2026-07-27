@@ -81,7 +81,7 @@ def apply_main_decals_recipe(
         if "PS_NORMAL_OUTPUT" in defines:
             # Derivative scheduling changes the final octahedral encode by a
             # few float32 ULPs without changing the reconstructed normal.
-            executions[shader["selector"]]["absolute_tolerance"] = 5.0e-5
+            executions[shader["selector"]]["absolute_tolerance"] = 2.0e-5
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="main_decals", bodies=bodies, executions=executions,

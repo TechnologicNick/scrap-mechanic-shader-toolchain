@@ -104,61 +104,52 @@ float3 ApplyDecalNormal(
     return mad(normalZ, baseNormal, perturbation);
 }
 
-// Instruction-ordered form of the tangent-frame blend.  The temporary axis
-// layout mirrors the shipped shader so derivative and normalization rounding
-// remain stable across the legacy HLSL compiler.
-float2 EncodeDecalNormalExact(
+// The same tangent-frame reconstruction with explicit intermediate products.
+// FXC otherwise contracts the two derivative axes differently from the
+// shipped program near degenerate frames.
+float2 EncodeDecalNormal(
     float3 viewPosition, float2 atlasUv, float2 sampledNormal,
     float2 encodedBaseNormal)
 {
-    float4 r0, r1, r2, r3, r4, r5;
-    r0.xy = sampledNormal;
-    r1.xy = encodedBaseNormal;
-    r4.xyz = -viewPosition.yzx;
-    r3.xy = atlasUv;
-    r0.z = 1.0 - abs(r1.x);
-    r2.x = r0.z - abs(r1.y);
-    r0.z = saturate(-r2.x);
-    r1.zw = r1.xy >= 0.0;
-    r0.zw = r1.zw ? -r0.zz : r0.zz;
-    r2.yz = r0.zw + r1.xy;
-    r0.z = dot(r2.xyz, r2.xyz);
-    r0.z = rsqrt(r0.z);
-    r1.xyz = r2.xyz * r0.zzz;
-    r2.xyz = ddy_coarse(r4.xyz);
-    r4.xyz = ddx_coarse(r4.zxy);
-    r5.xyz = r1.yzx * r2.xyz;
-    r2.xyz = mad(r2.zxy, r1.zxy, -r5.xyz);
-    r5.xyz = r1.zxy * r4.xyz;
-    r4.xyz = mad(r1.yzx, r4.yzx, -r5.xyz);
-    r0.zw = ddy_coarse(r3.xy);
-    r3.xy = ddx_coarse(r3.xy);
-    precise float3 weightedBitangentX = r0.z * r4.xyz;
-    precise float3 weightedBitangentY = r0.w * r4.xyz;
-    r3.yzw = mad(r2.xyz, r3.y, weightedBitangentY);
-    r2.xyz = mad(r2.xyz, r3.x, weightedBitangentX);
-    r0.z = dot(r2.xyz, r2.xyz);
-    r0.w = dot(r3.yzw, r3.yzw);
-    r0.z = max(r0.w, r0.z);
-    r0.z = rsqrt(r0.z);
-    r3.xyz = r3.yzw * r0.zzz;
-    r2.xyz = r2.xyz * r0.zzz;
-    precise float3 weightedAxisY = r0.y * r3.xyz;
-    r2.xyz = mad(r0.x, r2.xyz, weightedAxisY);
-    r0.x = 1.0 - dot(r0.xy, r0.xy);
-    r0.x = sqrt(max(0.0, r0.x));
-    r0.xyz = mad(r0.x, r1.xyz, r2.xyz);
-    r0.w = rsqrt(dot(r0.xyz, r0.xyz));
-    r0.xyz *= r0.w;
-    r0.w = abs(r0.z) + abs(r0.y);
-    r0.w = abs(r0.x) + r0.w;
-    r0.xyz /= r0.w;
-    r1.xy = 1.0 - abs(r0.zy);
-    r2.xyz = r0.xyz >= 0.0;
-    r0.xw = r2.yz ? 1.0 : -1.0;
-    r0.xw *= r1.xy;
-    r0.xy = r2.x ? r0.yz : r0.xw;
-    return mad(r0.xy, 0.5, 0.5);
+    float3 baseNormal = DecodeOctahedral(encodedBaseNormal);
+    float3 derivativePosition = -viewPosition.yzx;
+    float3 positionDy = ddy_coarse(derivativePosition);
+    float3 positionDx = ddx_coarse(derivativePosition.zxy);
+
+    float3 tangentProduct = baseNormal.yzx * positionDy;
+    float3 tangent = mad(positionDy.zxy, baseNormal.zxy, -tangentProduct);
+    float3 bitangentProduct = baseNormal.zxy * positionDx;
+    float3 bitangent = mad(baseNormal.yzx, positionDx.yzx, -bitangentProduct);
+
+    float2 uvDy = ddy_coarse(atlasUv);
+    float2 uvDx = ddx_coarse(atlasUv);
+    precise float3 bitangentAlongX = uvDy.x * bitangent;
+    precise float3 bitangentAlongY = uvDy.y * bitangent;
+    float3 normalAxisY = mad(tangent, uvDx.y, bitangentAlongY);
+    float3 normalAxisX = mad(tangent, uvDx.x, bitangentAlongX);
+
+    float inverseScale = rsqrt(max(
+        dot(normalAxisX, normalAxisX),
+        dot(normalAxisY, normalAxisY)
+    ));
+    normalAxisY *= inverseScale;
+    normalAxisX *= inverseScale;
+    precise float3 weightedAxisY = sampledNormal.y * normalAxisY;
+    float3 perturbation = mad(sampledNormal.x, normalAxisX, weightedAxisY);
+
+    float normalZ = sqrt(max(0.0, 1.0 - dot(sampledNormal, sampledNormal)));
+    float3 blendedNormal = mad(normalZ, baseNormal, perturbation);
+    blendedNormal *= rsqrt(dot(blendedNormal, blendedNormal));
+
+    float l1Length = abs(blendedNormal.z) + abs(blendedNormal.y);
+    l1Length = abs(blendedNormal.x) + l1Length;
+    blendedNormal /= l1Length;
+    float2 folded = 1.0 - abs(blendedNormal.zy);
+    float2 foldSign = blendedNormal.yz >= 0.0 ? 1.0 : -1.0;
+    folded *= foldSign;
+    float2 encoded = blendedNormal.x >= 0.0
+        ? blendedNormal.yz : folded;
+    return mad(encoded, 0.5, 0.5);
 }
 
 #if defined(PS_DIFFUSE_OUTPUT) || defined(PS_MATERIAL_OUTPUT) || defined(PS_NORMAL_OUTPUT)
@@ -224,7 +215,7 @@ DecalOutput mainPS(
         LinearClampClamp_s, float3(atlasUv, textureAndColor.y), mip)
         * 1.99215686 - 1.0;
     float2 baseNormal = tGbufferNormal.Load(int3(pixel, 0)) * 2.0 - 1.0;
-    output.normal = EncodeDecalNormalExact(
+    output.normal = EncodeDecalNormal(
         viewPosition, atlasUv, sampledNormal, baseNormal);
 #endif
     return output;
