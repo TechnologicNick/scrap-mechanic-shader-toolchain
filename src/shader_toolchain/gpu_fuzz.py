@@ -231,7 +231,7 @@ def fuzz_semantic_shader(
         raise ToolchainError("unsupported sampler filter")
     if output_kind not in ("color", "depth"):
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
-    if constant_profile not in ("projection", "random"):
+    if constant_profile not in ("projection", "random", "hdr"):
         raise ToolchainError(f"unsupported constant profile: {constant_profile}")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)

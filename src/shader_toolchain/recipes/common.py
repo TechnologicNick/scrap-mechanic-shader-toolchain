@@ -32,6 +32,14 @@ def ensure_projection_include(staging: Path) -> None:
         )
 
 
+def ensure_hdr_include(staging: Path) -> None:
+    include_dir = staging / "semantic" / "include"
+    include_dir.mkdir(parents=True, exist_ok=True)
+    path = include_dir / "hdr_abi.hlsl"
+    if not path.exists():
+        path.write_text(asset("hdr_abi.hlsl"), encoding="utf-8", newline="\n")
+
+
 def emit_validated_module(
     staging: Path,
     shaders: list[dict[str, Any]],

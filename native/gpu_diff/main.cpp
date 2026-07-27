@@ -36,6 +36,7 @@ struct Options {
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     uint32_t constant_buffer_slot = 5;
     bool random_constants = false;
+    bool hdr_constants = false;
     bool depth_output = false;
     bool warp = false;
 };
@@ -183,9 +184,11 @@ Options parse_options(int argc, char** argv) {
             const std::string profile = value();
             if (profile == "random") {
                 options.random_constants = true;
+            } else if (profile == "hdr") {
+                options.hdr_constants = true;
             } else if (profile != "projection") {
                 throw std::runtime_error(
-                    "constant profile must be projection or random");
+                    "constant profile must be projection, random, or hdr");
             }
         } else if (name == "--filter") {
             const std::string filter = value();
@@ -311,11 +314,23 @@ public:
     }
 
     void update_constants(uint32_t case_index) {
-        if (!options_.random_constants) {
+        if (!options_.random_constants && !options_.hdr_constants) {
             return;
         }
         std::array<float, 62 * 4> constants{};
-        if (case_index == 1) {
+        if (options_.hdr_constants) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            constants[3 * 4 + 3] = case_index == 0
+                ? 1.0f
+                : 0.5f + random.unit() * 2.0f;
+            constants[4 * 4 + 2] = case_index == 0
+                ? 0.0f
+                : random.unit() * 0.25f;
+            constants[4 * 4 + 3] = case_index == 0
+                ? 1.0f
+                : 0.5f + random.unit() * 1.5f;
+        } else if (case_index == 1) {
             constants.fill(1.0f);
         } else if (case_index > 1) {
             SplitMix64 random{
@@ -908,7 +923,9 @@ int main(int argc, char** argv) {
                   << "  \"constant_buffer_slot\": "
                   << options.constant_buffer_slot << ",\n"
                   << "  \"constant_profile\": \""
-                  << (options.random_constants ? "random" : "projection")
+                  << (options.random_constants
+                        ? "random"
+                        : (options.hdr_constants ? "hdr" : "projection"))
                   << "\",\n"
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
