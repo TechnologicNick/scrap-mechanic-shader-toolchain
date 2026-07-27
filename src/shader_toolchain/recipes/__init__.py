@@ -6,6 +6,7 @@ from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_fxaa import apply_post_fxaa_recipe
+from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 
 
 RECIPES = (
@@ -15,6 +16,7 @@ RECIPES = (
     apply_copy_depth_recipe,
     apply_copy_rgba_recipe,
     apply_copy_blend_recipe,
+    apply_post_resolve_transparency_recipe,
 )
 
 
