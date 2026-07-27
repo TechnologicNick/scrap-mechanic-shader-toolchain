@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .build import build_cache
+from .compare import compare_caches
 from .reconstruct import ToolchainError, reconstruct, verify_output
 from .sbc import FormatError
 
@@ -42,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fail instead of using exact recovered DXBC when a lift does not compile",
     )
+    compare_parser = commands.add_parser(
+        "compare", help="compare shader assembly and runtime ABI between two caches"
+    )
+    compare_parser.add_argument("baseline", type=Path)
+    compare_parser.add_argument("candidate", type=Path)
+    compare_parser.add_argument("--report", type=Path)
+    compare_parser.add_argument("--diff-dir", type=Path)
     return parser
 
 
@@ -69,6 +77,15 @@ def main() -> int:
                 progress=lambda completed, total: print(
                     f"compiled {completed}/{total}", file=sys.stderr
                 ),
+            )
+            print(json.dumps(summary, indent=2, sort_keys=True))
+            return 0
+        if args.command == "compare":
+            summary = compare_caches(
+                args.baseline,
+                args.candidate,
+                report_path=args.report,
+                diff_dir=args.diff_dir,
             )
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 0
