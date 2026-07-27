@@ -706,6 +706,7 @@ def fuzz_semantic_shader(
             "slot": int(binding["slot"]),
             "elements": int(binding["elements"]),
             "stride": int(binding.get("stride", 4)),
+            "profile": str(binding.get("profile", "random")),
         }
         for binding in execution.get("structured_inputs", [])
     ]
@@ -732,6 +733,7 @@ def fuzz_semantic_shader(
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
         or binding["stride"] < 4 or binding["stride"] % 4
+        or binding["profile"] not in ("random", "zero")
         for binding in structured_inputs
     ) or any(
         binding["slot"] < 0 or binding["elements"] < 1

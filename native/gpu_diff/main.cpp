@@ -68,10 +68,16 @@ struct TextureBinding {
     uint32_t slices = 0;
 };
 
+enum class StructuredInputProfile {
+    random,
+    zero,
+};
+
 struct StructuredInputBinding {
     uint32_t slot;
     uint32_t elements;
     uint32_t stride = sizeof(uint32_t);
+    StructuredInputProfile profile = StructuredInputProfile::random;
 };
 
 enum class StructuredOutputProfile {
@@ -362,6 +368,9 @@ Options parse_options(int argc, char** argv) {
             while (std::getline(bindings, binding, ',')) {
                 const size_t first = binding.find(':');
                 const size_t second = binding.find(':', first + 1);
+                const size_t third = second == std::string::npos
+                    ? std::string::npos
+                    : binding.find(':', second + 1);
                 if (first == std::string::npos) {
                     throw std::runtime_error(
                         "structured inputs must use slot:elements[:stride]");
@@ -372,7 +381,12 @@ Options parse_options(int argc, char** argv) {
                         first + 1, second == std::string::npos
                             ? std::string::npos : second - first - 1))),
                     second == std::string::npos ? 4u : static_cast<uint32_t>(
-                        parse_u64(binding.substr(second + 1))),
+                        parse_u64(binding.substr(
+                            second + 1, third == std::string::npos
+                                ? std::string::npos : third - second - 1))),
+                    third != std::string::npos && binding.substr(third + 1) == "zero"
+                        ? StructuredInputProfile::zero
+                        : StructuredInputProfile::random,
                 });
             }
         } else if (name == "--smooth-texture-slots") {
@@ -1748,7 +1762,10 @@ int main(int argc, char** argv) {
             }
             for (size_t resource = 0; resource < structured_inputs.size(); ++resource) {
                 auto& values = structured_inputs[resource];
-                if (index == 0) {
+                if (options.structured_inputs[resource].profile
+                    == StructuredInputProfile::zero) {
+                    std::fill(values.begin(), values.end(), 0u);
+                } else if (index == 0) {
                     std::fill(values.begin(), values.end(), 0u);
                 } else if (index == 1) {
                     if (options.structured_inputs[resource].stride == 32) {
