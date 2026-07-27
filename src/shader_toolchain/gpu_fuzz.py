@@ -66,6 +66,30 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_PACKED_UV_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float4 uv : UV0;
+    float4 unscaledUv : UNSCALED_UV0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] = {
+        float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)
+    };
+    static const float2 coordinates[3] = {
+        float2(0.0, 1.0), float2(2.0, 1.0), float2(0.0, -1.0)
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.uv = float4(coordinates[vertexId], 0.0, 0.0);
+    output.unscaledUv = float4(0.0, 0.0, coordinates[vertexId]);
+    return output;
+}
+"""
+
 FULLSCREEN_VOXEL_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -664,6 +688,7 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_unscaled": FULLSCREEN_UNSCALED_VERTEX,
+    "fullscreen_packed_uv": FULLSCREEN_PACKED_UV_VERTEX,
     "fullscreen_voxel": FULLSCREEN_VOXEL_VERTEX,
     "decals": DECALS_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,

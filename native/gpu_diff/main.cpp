@@ -907,14 +907,14 @@ public:
                 float* light = constants.data() + index * 12;
                 light[0] = 0.15f * (random.unit() - 0.5f);
                 light[1] = 0.15f * (random.unit() - 0.5f);
-                light[2] = -5.0f;
-                light[3] = -75.0f;
+                light[2] = -0.7f;
+                light[3] = 0.13f;
                 set_uint(index * 12 + 4, 0xff906000u);
                 light[5] = 1.0f;
                 light[6] = 2.0f;
                 light[7] = 2.0f;
-                light[8] = 0.08f;
-                light[9] = 0.08f;
+                light[8] = 1.6f;
+                light[9] = 1.6f;
             };
             const auto initialize_cone = [&](uint32_t index) {
                 float* light = constants.data() + (765 + index * 40);
@@ -2057,7 +2057,7 @@ int main(int argc, char** argv) {
                             "volumetric structured input needs 17 uint elements");
                     }
                     switch (index % 8) {
-                    case 1: values[0] = 0x001u; values[1] = 0x1u; break;
+                    case 1: values[0] = 0x001u; values[1] = 0x2u; break;
                     case 2: values[0] = 0x100u; values[9] = 0x1u; break;
                     case 3:
                         values[0] = 0x101u; values[1] = 0x1u; values[9] = 0x1u;
