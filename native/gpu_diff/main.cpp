@@ -444,6 +444,10 @@ private:
         std::array<float, 62 * 4> constants{};
         constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
         constants[51 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
+        constants[52 * 4] = 1.0f / static_cast<float>(options_.width);
+        constants[52 * 4 + 1] = 1.0f / static_cast<float>(options_.height);
+        constants[52 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
+        constants[52 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
         constants[53 * 4] = 1.0f;
         constants[53 * 4 + 1] = 1.0f;
         constants[54 * 4] = 1.0f - 0.5f / static_cast<float>(options_.width);
