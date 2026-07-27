@@ -29,6 +29,7 @@ enum class ConstantProfile {
     cluster,
     reflection,
     bloom,
+    ao,
 };
 
 struct ConstantBinding {
@@ -171,8 +172,9 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "cluster") return ConstantProfile::cluster;
     if (profile == "reflection") return ConstantProfile::reflection;
     if (profile == "bloom") return ConstantProfile::bloom;
+    if (profile == "ao") return ConstantProfile::ao;
     throw std::runtime_error(
-        "constant profile must be projection, random, hdr, rect, cluster, reflection, or bloom");
+        "constant profile must be projection, random, hdr, rect, cluster, reflection, bloom, or ao");
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -184,6 +186,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::cluster: return "cluster";
     case ConstantProfile::reflection: return "reflection";
     case ConstantProfile::bloom: return "bloom";
+    case ConstantProfile::ao: return "ao";
     }
     return "unknown";
 }
@@ -619,6 +622,19 @@ public:
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
             std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::ao) {
+            constants[3 * 4 + 0] = 1.0f;
+            constants[3 * 4 + 1] = 1.0f;
+            constants[3 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
+            constants[3 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
+            std::memcpy(&constants[4 * 4 + 0], &options_.width, sizeof(options_.width));
+            std::memcpy(&constants[4 * 4 + 1], &options_.height, sizeof(options_.height));
+            constants[5 * 4 + 0] = 1.0f;
+            constants[5 * 4 + 1] = 1.0f;
+            constants[5 * 4 + 2] = 1.0f - 0.5f / static_cast<float>(options_.width);
+            constants[5 * 4 + 3] = 1.0f - 0.5f / static_cast<float>(options_.height);
+            constants[6 * 4 + 2] = 1.0f;
+            constants[6 * 4 + 3] = 1.0f;
         } else if (profile == ConstantProfile::bloom) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
@@ -686,6 +702,7 @@ public:
             constants[3 * 4 + 2] = -1.0f;
             constants[49 * 4 + 2] = 1.0f;
             constants[49 * 4 + 3] = 1.0f;
+            constants[49 * 4 + 1] = 500.0f;
             std::memcpy(
                 &constants[51 * 4], &options_.width, sizeof(options_.width));
             std::memcpy(

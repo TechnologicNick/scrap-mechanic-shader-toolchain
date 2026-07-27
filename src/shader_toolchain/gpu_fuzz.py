@@ -642,7 +642,7 @@ def fuzz_semantic_shader(
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if any(
         binding["profile"] not in (
-            "projection", "random", "hdr", "rect", "cluster", "reflection", "bloom"
+            "projection", "random", "hdr", "rect", "cluster", "reflection", "bloom", "ao"
         )
         for binding in constant_buffers
     ):
