@@ -15,6 +15,7 @@ from .copy_rgba import apply_copy_rgba_recipe
 from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
+from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_fxaa import apply_post_fxaa_recipe
@@ -45,6 +46,7 @@ RECIPES = (
     apply_gui_silhouette_recipe,
     apply_gui_blurry_background_recipe,
     apply_copy_to_shadow_atlas_recipe,
+    apply_gui_texture_3d_recipe,
 )
 
 

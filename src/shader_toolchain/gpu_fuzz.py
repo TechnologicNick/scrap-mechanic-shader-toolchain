@@ -159,6 +159,7 @@ def _invoke_harness(
     absolute_tolerance: float,
     relative_tolerance: float,
     texture_slots: list[int],
+    texture_kinds: list[str],
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
@@ -185,8 +186,11 @@ def _invoke_harness(
         str(absolute_tolerance),
         "--relative-tolerance",
         str(relative_tolerance),
-        "--texture-slots",
-        ",".join(str(slot) for slot in texture_slots),
+        "--textures",
+        ",".join(
+            f"{slot}:{kind}"
+            for slot, kind in zip(texture_slots, texture_kinds, strict=True)
+        ),
         "--samplers",
         ",".join(
             f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
@@ -246,6 +250,14 @@ def fuzz_semantic_shader(
             "texture_slots", [execution.get("texture_slot", 0)]
         )
     ]
+    texture_kinds = [
+        str(kind)
+        for kind in execution.get("texture_kinds", ["2d"] * len(texture_slots))
+    ]
+    if len(texture_kinds) != len(texture_slots):
+        raise ToolchainError("texture slots and kinds must have equal lengths")
+    if any(kind not in ("2d", "3d", "2darray", "cube") for kind in texture_kinds):
+        raise ToolchainError("unsupported texture kind")
     samplers = execution.get(
         "samplers",
         [
@@ -324,6 +336,7 @@ def fuzz_semantic_shader(
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
             texture_slots=texture_slots,
+            texture_kinds=texture_kinds,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -344,6 +357,7 @@ def fuzz_semantic_shader(
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
             texture_slots=texture_slots,
+            texture_kinds=texture_kinds,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -358,6 +372,7 @@ def fuzz_semantic_shader(
         "semantic_recipe": pixel["semantic_recipe"],
         "semantic_execution": {
             "texture_slots": texture_slots,
+            "texture_kinds": texture_kinds,
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,

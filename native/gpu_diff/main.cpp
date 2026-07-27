@@ -33,6 +33,18 @@ struct ConstantBinding {
     ConstantProfile profile;
 };
 
+enum class TextureKind {
+    two_d,
+    three_d,
+    two_d_array,
+    cube,
+};
+
+struct TextureBinding {
+    uint32_t slot;
+    TextureKind kind;
+};
+
 struct Options {
     std::filesystem::path vertex;
     std::filesystem::path baseline;
@@ -44,7 +56,7 @@ struct Options {
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
-    std::vector<uint32_t> texture_slots = {0};
+    std::vector<TextureBinding> textures = {{0, TextureKind::two_d}};
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
@@ -145,6 +157,30 @@ const char* constant_profile_name(ConstantProfile profile) {
     return "unknown";
 }
 
+TextureKind parse_texture_kind(const std::string& kind) {
+    if (kind == "2d") return TextureKind::two_d;
+    if (kind == "3d") return TextureKind::three_d;
+    if (kind == "2darray") return TextureKind::two_d_array;
+    if (kind == "cube") return TextureKind::cube;
+    throw std::runtime_error("texture kind must be 2d, 3d, 2darray, or cube");
+}
+
+const char* texture_kind_name(TextureKind kind) {
+    switch (kind) {
+    case TextureKind::two_d: return "2d";
+    case TextureKind::three_d: return "3d";
+    case TextureKind::two_d_array: return "2darray";
+    case TextureKind::cube: return "cube";
+    }
+    return "unknown";
+}
+
+uint32_t texture_slices(TextureKind kind) {
+    if (kind == TextureKind::cube) return 6;
+    if (kind == TextureKind::two_d_array || kind == TextureKind::three_d) return 4;
+    return 1;
+}
+
 Options parse_options(int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -176,15 +212,29 @@ Options parse_options(int argc, char** argv) {
         } else if (name == "--relative-tolerance") {
             options.relative_tolerance = parse_double(value());
         } else if (name == "--texture-slot") {
-            options.texture_slots = {
-                static_cast<uint32_t>(parse_u64(value()))};
+            options.textures = {{
+                static_cast<uint32_t>(parse_u64(value())), TextureKind::two_d}};
         } else if (name == "--texture-slots") {
-            options.texture_slots.clear();
+            options.textures.clear();
             std::stringstream slots(value());
             std::string slot;
             while (std::getline(slots, slot, ',')) {
-                options.texture_slots.push_back(
-                    static_cast<uint32_t>(parse_u64(slot)));
+                options.textures.push_back({
+                    static_cast<uint32_t>(parse_u64(slot)), TextureKind::two_d});
+            }
+        } else if (name == "--textures") {
+            options.textures.clear();
+            std::stringstream bindings(value());
+            std::string binding;
+            while (std::getline(bindings, binding, ',')) {
+                const size_t separator = binding.find(':');
+                if (separator == std::string::npos) {
+                    throw std::runtime_error("textures must use slot:kind");
+                }
+                options.textures.push_back({
+                    static_cast<uint32_t>(parse_u64(binding.substr(0, separator))),
+                    parse_texture_kind(binding.substr(separator + 1)),
+                });
             }
         } else if (name == "--sampler-slot") {
             options.samplers.front().first =
@@ -262,14 +312,14 @@ Options parse_options(int argc, char** argv) {
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
     }
-    if (options.texture_slots.empty()) {
+    if (options.textures.empty()) {
         throw std::runtime_error("at least one texture slot is required");
     }
     if (std::any_of(
-            options.texture_slots.begin(),
-            options.texture_slots.end(),
-            [](uint32_t slot) {
-                return slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+            options.textures.begin(),
+            options.textures.end(),
+            [](const TextureBinding& texture) {
+                return texture.slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
             })
         || std::any_of(
             options.samplers.begin(),
@@ -350,13 +400,27 @@ public:
     D3D_FEATURE_LEVEL feature_level() const { return feature_level_; }
 
     void update_input(size_t index, const std::vector<float>& values) {
-        context_->UpdateSubresource(
-            inputs_.at(index).Get(),
-            0,
-            nullptr,
-            values.data(),
-            options_.width * 4 * sizeof(float),
-            0);
+        const TextureKind kind = options_.textures.at(index).kind;
+        const UINT row_pitch = options_.width * 4 * sizeof(float);
+        const UINT slice_pitch = row_pitch * options_.height;
+        if (kind == TextureKind::three_d) {
+            context_->UpdateSubresource(
+                inputs_.at(index).Get(), 0, nullptr, values.data(),
+                row_pitch, slice_pitch);
+        } else {
+            const uint32_t slices = texture_slices(kind);
+            for (uint32_t slice = 0; slice < slices; ++slice) {
+                context_->UpdateSubresource(
+                    inputs_.at(index).Get(),
+                    D3D11CalcSubresource(0, slice, 1),
+                    nullptr,
+                    values.data()
+                        + static_cast<size_t>(slice) * options_.width
+                            * options_.height * 4,
+                    row_pitch,
+                    0);
+            }
+        }
     }
 
     void update_constants(uint32_t case_index) {
@@ -518,6 +582,42 @@ private:
         return texture;
     }
 
+    ComPtr<ID3D11Resource> create_input_texture(TextureKind kind) {
+        if (kind == TextureKind::three_d) {
+            D3D11_TEXTURE3D_DESC description{};
+            description.Width = options_.width;
+            description.Height = options_.height;
+            description.Depth = texture_slices(kind);
+            description.MipLevels = 1;
+            description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+            description.Usage = D3D11_USAGE_DEFAULT;
+            description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            ComPtr<ID3D11Texture3D> texture;
+            check(device_->CreateTexture3D(&description, nullptr, &texture), "CreateTexture3D");
+            ComPtr<ID3D11Resource> resource;
+            check(texture.As(&resource), "query Texture3D resource");
+            return resource;
+        }
+
+        D3D11_TEXTURE2D_DESC description{};
+        description.Width = options_.width;
+        description.Height = options_.height;
+        description.MipLevels = 1;
+        description.ArraySize = texture_slices(kind);
+        description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        description.SampleDesc.Count = 1;
+        description.Usage = D3D11_USAGE_DEFAULT;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (kind == TextureKind::cube) {
+            description.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+        }
+        ComPtr<ID3D11Texture2D> texture;
+        check(device_->CreateTexture2D(&description, nullptr, &texture), "Create input Texture2D");
+        ComPtr<ID3D11Resource> resource;
+        check(texture.As(&resource), "query Texture2D resource");
+        return resource;
+    }
+
     void create_pipeline() {
         const auto vertex = read_binary(options_.vertex);
         const auto baseline = read_binary(options_.baseline);
@@ -534,9 +634,8 @@ private:
                 candidate.data(), candidate.size(), nullptr, &candidate_shader_),
             "CreatePixelShader candidate");
 
-        for (size_t index = 0; index < options_.texture_slots.size(); ++index) {
-            inputs_.push_back(create_texture(
-                D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0));
+        for (const TextureBinding& binding : options_.textures) {
+            inputs_.push_back(create_input_texture(binding.kind));
             ComPtr<ID3D11ShaderResourceView> view;
             check(
                 device_->CreateShaderResourceView(
@@ -639,10 +738,10 @@ private:
             context_->PSSetConstantBuffers(
                 options_.constant_buffers[index].slot, 1, &constant_buffer);
         }
-        for (size_t index = 0; index < options_.texture_slots.size(); ++index) {
+        for (size_t index = 0; index < options_.textures.size(); ++index) {
             ID3D11ShaderResourceView* input_view = input_views_[index].Get();
             context_->PSSetShaderResources(
-                options_.texture_slots[index], 1, &input_view);
+                options_.textures[index].slot, 1, &input_view);
         }
         for (size_t index = 0; index < options_.samplers.size(); ++index) {
             ID3D11SamplerState* sampler = samplers_[index].Get();
@@ -667,7 +766,7 @@ private:
     ComPtr<ID3D11VertexShader> vertex_shader_;
     ComPtr<ID3D11PixelShader> baseline_shader_;
     ComPtr<ID3D11PixelShader> candidate_shader_;
-    std::vector<ComPtr<ID3D11Texture2D>> inputs_;
+    std::vector<ComPtr<ID3D11Resource>> inputs_;
     ComPtr<ID3D11Texture2D> render_target_;
     ComPtr<ID3D11Texture2D> depth_target_;
     ComPtr<ID3D11Texture2D> staging_;
@@ -906,9 +1005,12 @@ int main(int argc, char** argv) {
         Runner runner(options);
         SplitMix64 random{options.seed};
         std::vector<std::vector<float>> inputs(
-            options.texture_slots.size(),
-            std::vector<float>(
-                static_cast<size_t>(options.width) * options.height * 4));
+            options.textures.size());
+        for (size_t index = 0; index < inputs.size(); ++index) {
+            inputs[index].resize(
+                static_cast<size_t>(options.width) * options.height * 4
+                * texture_slices(options.textures[index].kind));
+        }
         uint64_t exact_values = 0;
         uint64_t compared_values = 0;
         double max_absolute_error = 0.0;
@@ -927,7 +1029,8 @@ int main(int argc, char** argv) {
                     inputs[resource],
                     index + static_cast<uint32_t>(resource * 3),
                     options.width,
-                    options.height,
+                    options.height
+                        * texture_slices(options.textures[resource].kind),
                     random);
                 if (resource == 0) {
                     pattern = resource_pattern;
@@ -983,11 +1086,20 @@ int main(int argc, char** argv) {
                   << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
                   << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
                   << "  \"texture_slots\": [";
-        for (size_t index = 0; index < options.texture_slots.size(); ++index) {
+        for (size_t index = 0; index < options.textures.size(); ++index) {
             if (index != 0) {
                 std::cout << ", ";
             }
-            std::cout << options.texture_slots[index];
+            std::cout << options.textures[index].slot;
+        }
+        std::cout << "],\n"
+                  << "  \"texture_kinds\": [";
+        for (size_t index = 0; index < options.textures.size(); ++index) {
+            if (index != 0) {
+                std::cout << ", ";
+            }
+            std::cout << "\"" << texture_kind_name(options.textures[index].kind)
+                      << "\"";
         }
         std::cout << "],\n"
                   << "  \"samplers\": [";
