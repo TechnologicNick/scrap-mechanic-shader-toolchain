@@ -14,19 +14,8 @@ if (-not $visualStudio) {
 }
 
 $msbuild = Join-Path $visualStudio "MSBuild\Current\Bin\MSBuild.exe"
-$migotoRoot = Join-Path $repository "third_party\3Dmigoto"
-$migotoProject = Join-Path $migotoRoot "HLSLDecompiler\cmd_Decompiler\cmd_Decompiler.vcxproj"
-& $msbuild $migotoProject /p:Configuration=Release /p:Platform=x64 `
-    "/p:SolutionDir=$migotoRoot\" /m /v:minimal
+$project = Join-Path $repository "native\gpu_diff\gpu_diff.vcxproj"
+& $msbuild $project /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 if ($LASTEXITCODE -ne 0) {
-    throw "3DMigoto cmd_Decompiler build failed"
+    throw "GPU differential harness build failed"
 }
-
-$dxDecompilerProject = Join-Path $repository `
-    "third_party\DXDecompiler\src\DXDecompilerCmd\DXDecompilerCmd.csproj"
-dotnet build $dxDecompilerProject -c Release -v:minimal
-if ($LASTEXITCODE -ne 0) {
-    throw "DXDecompiler build failed"
-}
-
-& (Join-Path $PSScriptRoot "build-gpu-harness.ps1")

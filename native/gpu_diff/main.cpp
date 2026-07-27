@@ -1,0 +1,701 @@
+#include <d3d11.h>
+#include <dxgi.h>
+#include <wrl/client.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using Microsoft::WRL::ComPtr;
+
+namespace {
+
+struct Options {
+    std::filesystem::path vertex;
+    std::filesystem::path baseline;
+    std::filesystem::path candidate;
+    std::filesystem::path failure_dir;
+    uint32_t width = 64;
+    uint32_t height = 64;
+    uint32_t cases = 256;
+    uint64_t seed = 0x534D465841413031ull;
+    double absolute_tolerance = 0.0;
+    double relative_tolerance = 0.0;
+    bool warp = false;
+};
+
+struct SplitMix64 {
+    uint64_t state;
+
+    uint64_t next() {
+        uint64_t value = (state += 0x9E3779B97F4A7C15ull);
+        value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
+        value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
+        return value ^ (value >> 31);
+    }
+
+    float unit() {
+        return static_cast<float>(next() >> 40) * (1.0f / 16777216.0f);
+    }
+};
+
+struct Comparison {
+    bool passed = true;
+    uint64_t compared_values = 0;
+    uint64_t exact_values = 0;
+    uint64_t differing_values = 0;
+    uint64_t differing_pixels = 0;
+    double max_absolute_error = 0.0;
+    double max_relative_error = 0.0;
+    uint32_t max_ulp_error = 0;
+    size_t worst_index = 0;
+    float worst_baseline = 0.0f;
+    float worst_candidate = 0.0f;
+};
+
+void check(HRESULT result, const char* operation) {
+    if (FAILED(result)) {
+        std::ostringstream message;
+        message << operation << " failed with HRESULT 0x" << std::hex
+                << static_cast<uint32_t>(result);
+        throw std::runtime_error(message.str());
+    }
+}
+
+std::vector<uint8_t> read_binary(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary | std::ios::ate);
+    if (!stream) {
+        throw std::runtime_error("cannot open shader bytecode: " + path.string());
+    }
+    const auto size = stream.tellg();
+    if (size <= 0) {
+        throw std::runtime_error("empty shader bytecode: " + path.string());
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    stream.seekg(0);
+    stream.read(reinterpret_cast<char*>(bytes.data()), size);
+    if (!stream) {
+        throw std::runtime_error("cannot read shader bytecode: " + path.string());
+    }
+    return bytes;
+}
+
+uint64_t parse_u64(const std::string& text) {
+    size_t end = 0;
+    const uint64_t value = std::stoull(text, &end, 0);
+    if (end != text.size()) {
+        throw std::runtime_error("invalid integer: " + text);
+    }
+    return value;
+}
+
+double parse_double(const std::string& text) {
+    size_t end = 0;
+    const double value = std::stod(text, &end);
+    if (end != text.size() || !std::isfinite(value) || value < 0.0) {
+        throw std::runtime_error("invalid non-negative number: " + text);
+    }
+    return value;
+}
+
+Options parse_options(int argc, char** argv) {
+    Options options;
+    for (int index = 1; index < argc; ++index) {
+        const std::string name = argv[index];
+        auto value = [&]() -> std::string {
+            if (++index >= argc) {
+                throw std::runtime_error("missing value after " + name);
+            }
+            return argv[index];
+        };
+        if (name == "--vertex") {
+            options.vertex = std::filesystem::u8path(value());
+        } else if (name == "--baseline") {
+            options.baseline = std::filesystem::u8path(value());
+        } else if (name == "--candidate") {
+            options.candidate = std::filesystem::u8path(value());
+        } else if (name == "--failure-dir") {
+            options.failure_dir = std::filesystem::u8path(value());
+        } else if (name == "--width") {
+            options.width = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--height") {
+            options.height = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--cases") {
+            options.cases = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--seed") {
+            options.seed = parse_u64(value());
+        } else if (name == "--absolute-tolerance") {
+            options.absolute_tolerance = parse_double(value());
+        } else if (name == "--relative-tolerance") {
+            options.relative_tolerance = parse_double(value());
+        } else if (name == "--warp") {
+            options.warp = true;
+        } else {
+            throw std::runtime_error("unknown argument: " + name);
+        }
+    }
+    if (options.vertex.empty() || options.baseline.empty() || options.candidate.empty()) {
+        throw std::runtime_error("--vertex, --baseline, and --candidate are required");
+    }
+    if (options.width == 0 || options.height == 0 || options.cases == 0) {
+        throw std::runtime_error("width, height, and cases must be positive");
+    }
+    if (options.width > 4096 || options.height > 4096) {
+        throw std::runtime_error("texture dimensions must not exceed 4096");
+    }
+    return options;
+}
+
+std::string json_escape(const std::string& text) {
+    std::ostringstream output;
+    for (const unsigned char value : text) {
+        switch (value) {
+        case '\\': output << "\\\\"; break;
+        case '"': output << "\\\""; break;
+        case '\n': output << "\\n"; break;
+        case '\r': output << "\\r"; break;
+        case '\t': output << "\\t"; break;
+        default:
+            if (value < 0x20) {
+                output << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                       << static_cast<unsigned>(value) << std::dec;
+            } else {
+                output << static_cast<char>(value);
+            }
+        }
+    }
+    return output.str();
+}
+
+std::string feature_level_name(D3D_FEATURE_LEVEL level) {
+    switch (level) {
+    case D3D_FEATURE_LEVEL_11_1: return "11_1";
+    case D3D_FEATURE_LEVEL_11_0: return "11_0";
+    case D3D_FEATURE_LEVEL_10_1: return "10_1";
+    case D3D_FEATURE_LEVEL_10_0: return "10_0";
+    default: return "unknown";
+    }
+}
+
+class Runner {
+public:
+    explicit Runner(const Options& options) : options_(options) {
+        const std::array<D3D_FEATURE_LEVEL, 4> levels = {
+            D3D_FEATURE_LEVEL_11_1,
+            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_10_1,
+            D3D_FEATURE_LEVEL_10_0,
+        };
+        check(
+            D3D11CreateDevice(
+                nullptr,
+                options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE,
+                nullptr,
+                0,
+                levels.data(),
+                static_cast<UINT>(levels.size()),
+                D3D11_SDK_VERSION,
+                &device_,
+                &feature_level_,
+                &context_),
+            "D3D11CreateDevice");
+        discover_adapter();
+        create_pipeline();
+    }
+
+    const std::string& adapter_name() const { return adapter_name_; }
+    D3D_FEATURE_LEVEL feature_level() const { return feature_level_; }
+
+    void update_input(const std::vector<float>& values) {
+        context_->UpdateSubresource(
+            input_.Get(),
+            0,
+            nullptr,
+            values.data(),
+            options_.width * 4 * sizeof(float),
+            0);
+    }
+
+    std::vector<float> render(ID3D11PixelShader* shader) {
+        constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        context_->ClearRenderTargetView(render_target_view_.Get(), clear);
+        context_->PSSetShader(shader, nullptr, 0);
+        context_->Draw(3, 0);
+        context_->CopyResource(staging_.Get(), render_target_.Get());
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map output");
+        std::vector<float> output(
+            static_cast<size_t>(options_.width) * options_.height * 4);
+        const size_t row_size = static_cast<size_t>(options_.width) * 4 * sizeof(float);
+        for (uint32_t y = 0; y < options_.height; ++y) {
+            std::memcpy(
+                reinterpret_cast<uint8_t*>(output.data()) + y * row_size,
+                static_cast<const uint8_t*>(mapped.pData) + y * mapped.RowPitch,
+                row_size);
+        }
+        context_->Unmap(staging_.Get(), 0);
+        return output;
+    }
+
+    ID3D11PixelShader* baseline_shader() const { return baseline_shader_.Get(); }
+    ID3D11PixelShader* candidate_shader() const { return candidate_shader_.Get(); }
+
+private:
+    void discover_adapter() {
+        ComPtr<IDXGIDevice> dxgi_device;
+        check(device_.As(&dxgi_device), "query IDXGIDevice");
+        ComPtr<IDXGIAdapter> adapter;
+        check(dxgi_device->GetAdapter(&adapter), "GetAdapter");
+        DXGI_ADAPTER_DESC description{};
+        check(adapter->GetDesc(&description), "GetDesc");
+        const int required = WideCharToMultiByte(
+            CP_UTF8, 0, description.Description, -1, nullptr, 0, nullptr, nullptr);
+        if (required > 1) {
+            std::string utf8(static_cast<size_t>(required), '\0');
+            WideCharToMultiByte(
+                CP_UTF8,
+                0,
+                description.Description,
+                -1,
+                utf8.data(),
+                required,
+                nullptr,
+                nullptr);
+            utf8.pop_back();
+            adapter_name_ = utf8;
+        }
+    }
+
+    ComPtr<ID3D11Texture2D> create_texture(
+        D3D11_USAGE usage,
+        UINT bind_flags,
+        UINT cpu_flags) {
+        D3D11_TEXTURE2D_DESC description{};
+        description.Width = options_.width;
+        description.Height = options_.height;
+        description.MipLevels = 1;
+        description.ArraySize = 1;
+        description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        description.SampleDesc.Count = 1;
+        description.Usage = usage;
+        description.BindFlags = bind_flags;
+        description.CPUAccessFlags = cpu_flags;
+        ComPtr<ID3D11Texture2D> texture;
+        check(device_->CreateTexture2D(&description, nullptr, &texture), "CreateTexture2D");
+        return texture;
+    }
+
+    void create_pipeline() {
+        const auto vertex = read_binary(options_.vertex);
+        const auto baseline = read_binary(options_.baseline);
+        const auto candidate = read_binary(options_.candidate);
+        check(
+            device_->CreateVertexShader(vertex.data(), vertex.size(), nullptr, &vertex_shader_),
+            "CreateVertexShader");
+        check(
+            device_->CreatePixelShader(
+                baseline.data(), baseline.size(), nullptr, &baseline_shader_),
+            "CreatePixelShader baseline");
+        check(
+            device_->CreatePixelShader(
+                candidate.data(), candidate.size(), nullptr, &candidate_shader_),
+            "CreatePixelShader candidate");
+
+        input_ = create_texture(D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0);
+        render_target_ = create_texture(D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
+        staging_ = create_texture(D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
+        check(
+            device_->CreateShaderResourceView(input_.Get(), nullptr, &input_view_),
+            "CreateShaderResourceView");
+        check(
+            device_->CreateRenderTargetView(
+                render_target_.Get(), nullptr, &render_target_view_),
+            "CreateRenderTargetView");
+
+        D3D11_BUFFER_DESC buffer_description{};
+        buffer_description.ByteWidth = 62 * 16;
+        buffer_description.Usage = D3D11_USAGE_IMMUTABLE;
+        buffer_description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        std::array<float, 62 * 4> constants{};
+        constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
+        constants[51 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
+        constants[53 * 4] = 1.0f;
+        constants[53 * 4 + 1] = 1.0f;
+        constants[54 * 4] = 1.0f - 0.5f / static_cast<float>(options_.width);
+        constants[54 * 4 + 1] = 1.0f - 0.5f / static_cast<float>(options_.height);
+        D3D11_SUBRESOURCE_DATA buffer_data{};
+        buffer_data.pSysMem = constants.data();
+        check(
+            device_->CreateBuffer(
+                &buffer_description, &buffer_data, &constant_buffer_),
+            "CreateBuffer");
+
+        D3D11_SAMPLER_DESC sampler_description{};
+        sampler_description.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler_description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
+        check(
+            device_->CreateSamplerState(&sampler_description, &sampler_),
+            "CreateSamplerState");
+
+        D3D11_RASTERIZER_DESC rasterizer_description{};
+        rasterizer_description.FillMode = D3D11_FILL_SOLID;
+        rasterizer_description.CullMode = D3D11_CULL_NONE;
+        rasterizer_description.DepthClipEnable = TRUE;
+        check(
+            device_->CreateRasterizerState(
+                &rasterizer_description, &rasterizer_state_),
+            "CreateRasterizerState");
+
+        D3D11_VIEWPORT viewport{};
+        viewport.Width = static_cast<float>(options_.width);
+        viewport.Height = static_cast<float>(options_.height);
+        viewport.MaxDepth = 1.0f;
+        ID3D11Buffer* constant_buffer = constant_buffer_.Get();
+        ID3D11ShaderResourceView* input_view = input_view_.Get();
+        ID3D11SamplerState* sampler = sampler_.Get();
+        ID3D11RenderTargetView* target = render_target_view_.Get();
+        context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
+        context_->VSSetConstantBuffers(5, 1, &constant_buffer);
+        context_->PSSetConstantBuffers(5, 1, &constant_buffer);
+        context_->PSSetShaderResources(0, 1, &input_view);
+        context_->PSSetSamplers(6, 1, &sampler);
+        context_->RSSetState(rasterizer_state_.Get());
+        context_->RSSetViewports(1, &viewport);
+        context_->OMSetRenderTargets(1, &target, nullptr);
+    }
+
+    const Options& options_;
+    ComPtr<ID3D11Device> device_;
+    ComPtr<ID3D11DeviceContext> context_;
+    D3D_FEATURE_LEVEL feature_level_{};
+    std::string adapter_name_;
+    ComPtr<ID3D11VertexShader> vertex_shader_;
+    ComPtr<ID3D11PixelShader> baseline_shader_;
+    ComPtr<ID3D11PixelShader> candidate_shader_;
+    ComPtr<ID3D11Texture2D> input_;
+    ComPtr<ID3D11Texture2D> render_target_;
+    ComPtr<ID3D11Texture2D> staging_;
+    ComPtr<ID3D11ShaderResourceView> input_view_;
+    ComPtr<ID3D11RenderTargetView> render_target_view_;
+    ComPtr<ID3D11Buffer> constant_buffer_;
+    ComPtr<ID3D11SamplerState> sampler_;
+    ComPtr<ID3D11RasterizerState> rasterizer_state_;
+};
+
+std::string fill_case(
+    std::vector<float>& pixels,
+    uint32_t case_index,
+    uint32_t width,
+    uint32_t height,
+    SplitMix64& random) {
+    const auto write = [&](uint32_t x, uint32_t y, float r, float g, float b, float a) {
+        const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+        pixels[offset] = r;
+        pixels[offset + 1] = g;
+        pixels[offset + 2] = b;
+        pixels[offset + 3] = a;
+    };
+    const uint32_t pattern = case_index < 8 ? case_index : 8 + (case_index % 3);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            float r = 0.0f;
+            float g = 0.0f;
+            float b = 0.0f;
+            float a = 1.0f;
+            switch (pattern) {
+            case 0:
+                r = g = b = 0.0f;
+                break;
+            case 1:
+                r = g = b = 1.0f;
+                a = 0.25f;
+                break;
+            case 2:
+                r = g = b = x < width / 2 ? 0.0f : 1.0f;
+                break;
+            case 3:
+                r = g = b = y < height / 2 ? 0.0f : 1.0f;
+                break;
+            case 4:
+                r = g = b = x > y ? 1.0f : 0.0f;
+                break;
+            case 5:
+                r = g = b = ((x ^ y) & 1u) ? 1.0f : 0.0f;
+                break;
+            case 6:
+                r = g = b = (x == width / 2 && y == height / 2) ? 1.0f : 0.0f;
+                break;
+            case 7:
+                r = static_cast<float>(x) / static_cast<float>(std::max(1u, width - 1));
+                g = static_cast<float>(y) / static_cast<float>(std::max(1u, height - 1));
+                b = 1.0f - r;
+                a = g;
+                break;
+            case 8:
+                r = random.unit();
+                g = random.unit();
+                b = random.unit();
+                a = random.unit();
+                break;
+            case 9:
+                r = random.unit() * 20.0f - 4.0f;
+                g = random.unit() * 20.0f - 4.0f;
+                b = random.unit() * 20.0f - 4.0f;
+                a = random.unit() * 4.0f;
+                break;
+            default:
+                r = static_cast<float>(x) / static_cast<float>(std::max(1u, width - 1));
+                g = static_cast<float>(y) / static_cast<float>(std::max(1u, height - 1));
+                b = 0.5f * (r + g);
+                r += (random.unit() - 0.5f) * 0.02f;
+                g += (random.unit() - 0.5f) * 0.02f;
+                b += (random.unit() - 0.5f) * 0.02f;
+                a = random.unit();
+                break;
+            }
+            write(x, y, r, g, b, a);
+        }
+    }
+    static const std::array<const char*, 11> names = {
+        "black",
+        "white",
+        "vertical_edge",
+        "horizontal_edge",
+        "diagonal_edge",
+        "checkerboard",
+        "single_pixel",
+        "gradient",
+        "random_unit",
+        "random_hdr",
+        "noisy_gradient",
+    };
+    return names[pattern];
+}
+
+uint32_t ordered_float(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    if ((bits & 0x80000000u) != 0) {
+        return 0x80000000u - (bits & 0x7fffffffu);
+    }
+    return 0x80000000u + bits;
+}
+
+Comparison compare_outputs(
+    const std::vector<float>& baseline,
+    const std::vector<float>& candidate,
+    double absolute_tolerance,
+    double relative_tolerance) {
+    Comparison result;
+    result.compared_values = baseline.size();
+    std::vector<bool> differing_pixels(baseline.size() / 4, false);
+    for (size_t index = 0; index < baseline.size(); ++index) {
+        const float first = baseline[index];
+        const float second = candidate[index];
+        uint32_t first_bits = 0;
+        uint32_t second_bits = 0;
+        std::memcpy(&first_bits, &first, sizeof(first_bits));
+        std::memcpy(&second_bits, &second, sizeof(second_bits));
+        if (first_bits == second_bits) {
+            ++result.exact_values;
+            continue;
+        }
+        if (std::isnan(first) && std::isnan(second)) {
+            ++result.exact_values;
+            continue;
+        }
+        const double absolute = std::abs(static_cast<double>(first) - second);
+        const double scale = std::max(std::abs(static_cast<double>(first)),
+                                      std::abs(static_cast<double>(second)));
+        const double relative = scale > 0.0 ? absolute / scale : absolute;
+        uint32_t ulp = std::numeric_limits<uint32_t>::max();
+        if (std::isfinite(first) && std::isfinite(second)) {
+            const uint32_t a = ordered_float(first);
+            const uint32_t b = ordered_float(second);
+            ulp = a > b ? a - b : b - a;
+        }
+        if (absolute > result.max_absolute_error) {
+            result.max_absolute_error = absolute;
+            result.worst_index = index;
+            result.worst_baseline = first;
+            result.worst_candidate = second;
+        }
+        result.max_relative_error = std::max(result.max_relative_error, relative);
+        result.max_ulp_error = std::max(result.max_ulp_error, ulp);
+        const bool finite_match = std::isfinite(first) && std::isfinite(second)
+            && absolute <= absolute_tolerance + relative_tolerance * scale;
+        if (!finite_match) {
+            result.passed = false;
+            ++result.differing_values;
+            differing_pixels[index / 4] = true;
+        }
+    }
+    result.differing_pixels = static_cast<uint64_t>(std::count(
+        differing_pixels.begin(), differing_pixels.end(), true));
+    return result;
+}
+
+template <typename T>
+void write_raw(const std::filesystem::path& path, const std::vector<T>& values) {
+    std::ofstream stream(path, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("cannot create failure artifact: " + path.string());
+    }
+    stream.write(
+        reinterpret_cast<const char*>(values.data()),
+        static_cast<std::streamsize>(values.size() * sizeof(T)));
+}
+
+void preserve_failure(
+    const Options& options,
+    uint32_t case_index,
+    const std::string& pattern,
+    const std::vector<float>& input,
+    const std::vector<float>& baseline,
+    const std::vector<float>& candidate,
+    const Comparison& comparison) {
+    if (options.failure_dir.empty()) {
+        return;
+    }
+    std::filesystem::create_directories(options.failure_dir);
+    write_raw(options.failure_dir / "input.rgba32f", input);
+    write_raw(options.failure_dir / "baseline.rgba32f", baseline);
+    write_raw(options.failure_dir / "candidate.rgba32f", candidate);
+    std::filesystem::copy_file(
+        options.vertex,
+        options.failure_dir / "vertex.dxbc",
+        std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy_file(
+        options.baseline,
+        options.failure_dir / "baseline.dxbc",
+        std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy_file(
+        options.candidate,
+        options.failure_dir / "candidate.dxbc",
+        std::filesystem::copy_options::overwrite_existing);
+    std::ofstream report(options.failure_dir / "failure.json");
+    report << std::setprecision(17)
+           << "{\n"
+           << "  \"case_index\": " << case_index << ",\n"
+           << "  \"pattern\": \"" << json_escape(pattern) << "\",\n"
+           << "  \"seed\": " << options.seed << ",\n"
+           << "  \"width\": " << options.width << ",\n"
+           << "  \"height\": " << options.height << ",\n"
+           << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
+           << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+           << "  \"max_absolute_error\": " << comparison.max_absolute_error << ",\n"
+           << "  \"max_relative_error\": " << comparison.max_relative_error << ",\n"
+           << "  \"max_ulp_error\": " << comparison.max_ulp_error << ",\n"
+           << "  \"worst_value_index\": " << comparison.worst_index << "\n"
+           << "}\n";
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    try {
+        const Options options = parse_options(argc, argv);
+        Runner runner(options);
+        SplitMix64 random{options.seed};
+        std::vector<float> input(
+            static_cast<size_t>(options.width) * options.height * 4);
+        uint64_t exact_values = 0;
+        uint64_t compared_values = 0;
+        double max_absolute_error = 0.0;
+        double max_relative_error = 0.0;
+        uint32_t max_ulp_error = 0;
+        uint32_t tested_cases = 0;
+        bool passed = true;
+        std::string failed_pattern;
+        uint32_t failed_case = 0;
+        Comparison failure;
+
+        for (uint32_t index = 0; index < options.cases; ++index) {
+            const std::string pattern = fill_case(
+                input, index, options.width, options.height, random);
+            runner.update_input(input);
+            const auto baseline = runner.render(runner.baseline_shader());
+            const auto candidate = runner.render(runner.candidate_shader());
+            const Comparison comparison = compare_outputs(
+                baseline,
+                candidate,
+                options.absolute_tolerance,
+                options.relative_tolerance);
+            ++tested_cases;
+            exact_values += comparison.exact_values;
+            compared_values += comparison.compared_values;
+            max_absolute_error = std::max(
+                max_absolute_error, comparison.max_absolute_error);
+            max_relative_error = std::max(
+                max_relative_error, comparison.max_relative_error);
+            max_ulp_error = std::max(max_ulp_error, comparison.max_ulp_error);
+            if (!comparison.passed) {
+                passed = false;
+                failed_pattern = pattern;
+                failed_case = index;
+                failure = comparison;
+                preserve_failure(
+                    options,
+                    index,
+                    pattern,
+                    input,
+                    baseline,
+                    candidate,
+                    comparison);
+                break;
+            }
+        }
+
+        std::cout << std::setprecision(17)
+                  << "{\n"
+                  << "  \"passed\": " << (passed ? "true" : "false") << ",\n"
+                  << "  \"adapter\": \"" << json_escape(runner.adapter_name()) << "\",\n"
+                  << "  \"driver\": \"" << (options.warp ? "warp" : "hardware") << "\",\n"
+                  << "  \"feature_level\": \""
+                  << feature_level_name(runner.feature_level()) << "\",\n"
+                  << "  \"seed\": " << options.seed << ",\n"
+                  << "  \"requested_cases\": " << options.cases << ",\n"
+                  << "  \"tested_cases\": " << tested_cases << ",\n"
+                  << "  \"width\": " << options.width << ",\n"
+                  << "  \"height\": " << options.height << ",\n"
+                  << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
+                  << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+                  << "  \"compared_values\": " << compared_values << ",\n"
+                  << "  \"exact_values\": " << exact_values << ",\n"
+                  << "  \"max_absolute_error\": " << max_absolute_error << ",\n"
+                  << "  \"max_relative_error\": " << max_relative_error << ",\n"
+                  << "  \"max_ulp_error\": " << max_ulp_error;
+        if (!passed) {
+            std::cout << ",\n"
+                      << "  \"failed_case\": " << failed_case << ",\n"
+                      << "  \"failed_pattern\": \""
+                      << json_escape(failed_pattern) << "\",\n"
+                      << "  \"differing_values\": " << failure.differing_values << ",\n"
+                      << "  \"differing_pixels\": " << failure.differing_pixels << ",\n"
+                      << "  \"worst_value_index\": " << failure.worst_index << ",\n"
+                      << "  \"worst_baseline\": " << failure.worst_baseline << ",\n"
+                      << "  \"worst_candidate\": " << failure.worst_candidate;
+        }
+        std::cout << "\n}\n";
+        return passed ? 0 : 2;
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    }
+}
