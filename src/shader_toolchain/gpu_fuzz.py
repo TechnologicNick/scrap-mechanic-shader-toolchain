@@ -44,6 +44,41 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_GUI_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float4 texcoord0 : TEXCOORD0;
+    float4 texcoord1 : TEXCOORD1;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.texcoord0 = float4(coordinates[vertexId], 0.625, 0.875);
+    output.texcoord1 = float4(coordinates[vertexId], 0.375, 0.125);
+    return output;
+}
+"""
+
+VERTEX_HARNESSES = {
+    "fullscreen_uv": FULLSCREEN_UV_VERTEX,
+    "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
+}
+
 
 def select_shader_pair(
     manifest: dict[str, Any], source_name: str, pixel_selector: str | None = None
@@ -68,7 +103,7 @@ def select_shader_pair(
             f"found {len(pixels)}"
         )
     execution = pixels[0].get("semantic_execution", {}) if len(pixels) == 1 else {}
-    if execution.get("vertex_harness") == "fullscreen_uv":
+    if execution.get("vertex_harness") in VERTEX_HARNESSES:
         return None, pixels[0]
     vertex_selector = execution.get("vertex_selector")
     if vertex_selector:
@@ -267,12 +302,13 @@ def fuzz_semantic_shader(
         candidate_path = Path(temporary) / "semantic.dxbc"
         candidate_path.write_bytes(candidate)
         if vertex is None:
-            vertex_path = temporary_path / "fullscreen-uv.dxbc"
+            harness_name = str(execution["vertex_harness"])
+            vertex_path = temporary_path / f"{harness_name}.dxbc"
             vertex_bytecode = compiler.compile(
-                FULLSCREEN_UV_VERTEX, "harnessVS", "vs_5_0"
+                VERTEX_HARNESSES[harness_name], "harnessVS", "vs_5_0"
             )
             vertex_path.write_bytes(vertex_bytecode)
-            vertex_selector = "harness:fullscreen_uv"
+            vertex_selector = f"harness:{harness_name}"
         else:
             vertex_path = corpus / vertex["dxbc_path"]
             vertex_selector = vertex["selector"]
