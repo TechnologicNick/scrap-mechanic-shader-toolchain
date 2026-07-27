@@ -1,0 +1,11 @@
+.data/
+build/
+dist/
+output/
+third_party/*/build/
+*.py[cod]
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+
