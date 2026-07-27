@@ -33,6 +33,7 @@ enum class ConstantProfile {
     fsr_easu,
     fsr_rcas,
     index,
+    auto_hdr,
 };
 
 struct ConstantBinding {
@@ -65,10 +66,17 @@ struct StructuredInputBinding {
     uint32_t stride = sizeof(uint32_t);
 };
 
+enum class StructuredOutputProfile {
+    zero,
+    hdr_feedback,
+    hdr_setting,
+};
+
 struct StructuredOutputBinding {
     uint32_t slot;
     uint32_t elements;
     uint32_t stride = sizeof(uint32_t);
+    StructuredOutputProfile profile = StructuredOutputProfile::zero;
 };
 
 struct Options {
@@ -186,8 +194,17 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "fsr-easu") return ConstantProfile::fsr_easu;
     if (profile == "fsr-rcas") return ConstantProfile::fsr_rcas;
     if (profile == "index") return ConstantProfile::index;
+    if (profile == "auto-hdr") return ConstantProfile::auto_hdr;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
+}
+
+StructuredOutputProfile parse_structured_output_profile(
+    const std::string& profile) {
+    if (profile == "zero") return StructuredOutputProfile::zero;
+    if (profile == "hdr-feedback") return StructuredOutputProfile::hdr_feedback;
+    if (profile == "hdr-setting") return StructuredOutputProfile::hdr_setting;
+    throw std::runtime_error("unknown structured output profile: " + profile);
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -203,6 +220,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::fsr_easu: return "fsr-easu";
     case ConstantProfile::fsr_rcas: return "fsr-rcas";
     case ConstantProfile::index: return "index";
+    case ConstantProfile::auto_hdr: return "auto-hdr";
     }
     return "unknown";
 }
@@ -354,15 +372,21 @@ Options parse_options(int argc, char** argv) {
             while (std::getline(bindings, binding, ',')) {
                 const size_t first = binding.find(':');
                 const size_t second = binding.find(':', first + 1);
+                const size_t third = binding.find(':', second + 1);
                 if (first == std::string::npos || second == std::string::npos) {
                     throw std::runtime_error(
-                        "structured outputs must use slot:elements:stride");
+                        "structured outputs must use slot:elements:stride[:profile]");
                 }
                 options.structured_outputs.push_back({
                     static_cast<uint32_t>(parse_u64(binding.substr(0, first))),
                     static_cast<uint32_t>(parse_u64(binding.substr(
                         first + 1, second - first - 1))),
-                    static_cast<uint32_t>(parse_u64(binding.substr(second + 1))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(
+                        second + 1, third == std::string::npos
+                            ? std::string::npos : third - second - 1))),
+                    third == std::string::npos
+                        ? StructuredOutputProfile::zero
+                        : parse_structured_output_profile(binding.substr(third + 1)),
                 });
             }
         } else if (name == "--sampler-slot") {
@@ -475,7 +499,8 @@ Options parse_options(int argc, char** argv) {
     }
     if (options.structured_output_elements > 0 && options.structured_outputs.empty()) {
         options.structured_outputs.push_back({
-            0, options.structured_output_elements, options.structured_output_stride});
+            0, options.structured_output_elements, options.structured_output_stride,
+            StructuredOutputProfile::zero});
     }
     if (!options.structured_outputs.empty()
         && (options.stage != ShaderStage::compute || options.output_components != 1
@@ -486,7 +511,8 @@ Options parse_options(int argc, char** argv) {
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
     }
-    if (options.textures.empty() && options.structured_inputs.empty()) {
+    if (options.textures.empty() && options.structured_inputs.empty()
+        && options.structured_outputs.empty()) {
         throw std::runtime_error("at least one shader input is required");
     }
     if (std::any_of(
@@ -658,12 +684,52 @@ public:
         }
     }
 
+    void initialize_structured_outputs(uint32_t case_index) {
+        for (size_t index = 0; index < options_.structured_outputs.size(); ++index) {
+            const auto& binding = options_.structured_outputs[index];
+            std::vector<uint32_t> values(
+                static_cast<size_t>(binding.elements) * binding.stride / 4, 0);
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)
+                ^ (static_cast<uint64_t>(binding.slot) << 48)};
+            if (binding.profile == StructuredOutputProfile::hdr_feedback) {
+                for (size_t value = 0; value < std::min<size_t>(8, values.size()); ++value) {
+                    values[value] = 1u + static_cast<uint32_t>(random.next() % 2048u);
+                }
+                if (values.size() >= 8) {
+                    values[7] = 4u + static_cast<uint32_t>(random.next() % 252u);
+                }
+            } else if (binding.profile == StructuredOutputProfile::hdr_setting) {
+                const auto set_float = [&](size_t value, float number) {
+                    if (value < values.size()) {
+                        std::memcpy(&values[value], &number, sizeof(number));
+                    }
+                };
+                for (size_t value = 0; value < std::min<size_t>(20, values.size()); ++value) {
+                    set_float(value, 0.05f + random.unit() * 0.9f);
+                }
+                set_float(13, 0.8f + random.unit() * 0.4f);
+                set_float(18, 0.05f + random.unit() * 0.2f);
+                set_float(19, 0.5f + random.unit() * 2.0f);
+                for (size_t value = 20; value < std::min<size_t>(28, values.size()); ++value) {
+                    set_float(value, 10.0f + random.unit() * 790.0f);
+                }
+            }
+            context_->UpdateSubresource(
+                structured_outputs_[index].Get(), 0, nullptr,
+                values.data(), 0, 0);
+        }
+    }
+
     static constexpr size_t constant_register_count = 4096;
 
     std::array<float, constant_register_count * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
         std::array<float, constant_register_count * 4> constants{};
-        if (profile == ConstantProfile::index) {
+        if (profile == ConstantProfile::auto_hdr) {
+            const uint32_t dispatch_count = 1u + case_index % 16u;
+            std::memcpy(&constants[4], &dispatch_count, sizeof(dispatch_count));
+        } else if (profile == ConstantProfile::index) {
             constants[0] = 0.0f;
         } else if (profile == ConstantProfile::fsr_easu) {
             const float width = static_cast<float>(options_.width);
@@ -803,12 +869,7 @@ public:
     std::vector<float> render(bool candidate) {
         constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (options_.stage == ShaderStage::compute) {
-            if (!options_.structured_outputs.empty()) {
-                constexpr UINT clear_uint[4] = {0, 0, 0, 0};
-                for (const auto& view : structured_output_views_) {
-                    context_->ClearUnorderedAccessViewUint(view.Get(), clear_uint);
-                }
-            } else {
+            if (options_.structured_outputs.empty()) {
                 for (const auto& view : compute_views_) {
                     context_->ClearUnorderedAccessViewFloat(view.Get(), clear);
                 }
@@ -1622,7 +1683,9 @@ int main(int argc, char** argv) {
                 runner.update_structured_input(resource, values);
             }
             runner.update_constants(index);
+            runner.initialize_structured_outputs(index);
             const auto baseline = runner.render(false);
+            runner.initialize_structured_outputs(index);
             const auto candidate = runner.render(true);
             const Comparison comparison = compare_outputs(
                 baseline,

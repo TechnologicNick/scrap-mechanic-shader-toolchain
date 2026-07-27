@@ -461,7 +461,7 @@ def _invoke_harness(
         ),
         "--structured-inputs",
         ",".join(
-            f"{binding['slot']}:{binding['elements']}:{binding['stride']}"
+            f"{binding['slot']}:{binding['elements']}:{binding['stride']}:{binding['profile']}"
             for binding in structured_inputs
         ),
         "--structured-output-elements",
@@ -606,6 +606,7 @@ def fuzz_semantic_shader(
             "slot": int(binding["slot"]),
             "elements": int(binding["elements"]),
             "stride": int(binding.get("stride", 4)),
+            "profile": str(binding.get("profile", "zero")),
         }
         for binding in execution.get("structured_outputs", [])
     ]
@@ -614,6 +615,7 @@ def fuzz_semantic_shader(
             "slot": 0,
             "elements": structured_output_elements,
             "stride": structured_output_stride,
+            "profile": "zero",
         }]
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
@@ -622,6 +624,7 @@ def fuzz_semantic_shader(
     ) or any(
         binding["slot"] < 0 or binding["elements"] < 1
         or binding["stride"] < 4 or binding["stride"] % 4
+        or binding["profile"] not in ("zero", "hdr-feedback", "hdr-setting")
         for binding in structured_outputs
     ) or structured_output_elements < 0 or structured_output_stride < 4 \
             or structured_output_stride % 4:
@@ -667,7 +670,7 @@ def fuzz_semantic_shader(
     if any(
         binding["profile"] not in (
             "projection", "random", "hdr", "rect", "cluster", "reflection",
-            "bloom", "ao", "fsr-easu", "fsr-rcas", "index"
+            "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr"
         )
         for binding in constant_buffers
     ):
