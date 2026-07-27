@@ -43,6 +43,7 @@ enum class TextureKind {
 struct TextureBinding {
     uint32_t slot;
     TextureKind kind;
+    uint32_t mip_levels;
 };
 
 struct Options {
@@ -56,7 +57,7 @@ struct Options {
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
-    std::vector<TextureBinding> textures = {{0, TextureKind::two_d}};
+    std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
@@ -213,27 +214,36 @@ Options parse_options(int argc, char** argv) {
             options.relative_tolerance = parse_double(value());
         } else if (name == "--texture-slot") {
             options.textures = {{
-                static_cast<uint32_t>(parse_u64(value())), TextureKind::two_d}};
+                static_cast<uint32_t>(parse_u64(value())), TextureKind::two_d, 1}};
         } else if (name == "--texture-slots") {
             options.textures.clear();
             std::stringstream slots(value());
             std::string slot;
             while (std::getline(slots, slot, ',')) {
                 options.textures.push_back({
-                    static_cast<uint32_t>(parse_u64(slot)), TextureKind::two_d});
+                    static_cast<uint32_t>(parse_u64(slot)), TextureKind::two_d, 1});
             }
         } else if (name == "--textures") {
             options.textures.clear();
             std::stringstream bindings(value());
             std::string binding;
             while (std::getline(bindings, binding, ',')) {
-                const size_t separator = binding.find(':');
-                if (separator == std::string::npos) {
+                const size_t first = binding.find(':');
+                if (first == std::string::npos) {
                     throw std::runtime_error("textures must use slot:kind");
                 }
+                const size_t second = binding.find(':', first + 1);
+                const std::string kind = binding.substr(
+                    first + 1,
+                    second == std::string::npos
+                        ? std::string::npos
+                        : second - first - 1);
                 options.textures.push_back({
-                    static_cast<uint32_t>(parse_u64(binding.substr(0, separator))),
-                    parse_texture_kind(binding.substr(separator + 1)),
+                    static_cast<uint32_t>(parse_u64(binding.substr(0, first))),
+                    parse_texture_kind(kind),
+                    second == std::string::npos
+                        ? 1u
+                        : static_cast<uint32_t>(parse_u64(binding.substr(second + 1))),
                 });
             }
         } else if (name == "--sampler-slot") {
@@ -314,6 +324,13 @@ Options parse_options(int argc, char** argv) {
     }
     if (options.textures.empty()) {
         throw std::runtime_error("at least one texture slot is required");
+    }
+    if (std::any_of(
+            options.textures.begin(), options.textures.end(),
+            [](const TextureBinding& texture) {
+                return texture.mip_levels == 0 || texture.mip_levels > 13;
+            })) {
+        throw std::runtime_error("texture mip count must be between 1 and 13");
     }
     if (std::any_of(
             options.textures.begin(),
@@ -401,6 +418,7 @@ public:
 
     void update_input(size_t index, const std::vector<float>& values) {
         const TextureKind kind = options_.textures.at(index).kind;
+        const uint32_t mip_levels = options_.textures.at(index).mip_levels;
         const UINT row_pitch = options_.width * 4 * sizeof(float);
         const UINT slice_pitch = row_pitch * options_.height;
         if (kind == TextureKind::three_d) {
@@ -412,7 +430,7 @@ public:
             for (uint32_t slice = 0; slice < slices; ++slice) {
                 context_->UpdateSubresource(
                     inputs_.at(index).Get(),
-                    D3D11CalcSubresource(0, slice, 1),
+                    D3D11CalcSubresource(0, slice, mip_levels),
                     nullptr,
                     values.data()
                         + static_cast<size_t>(slice) * options_.width
@@ -420,6 +438,9 @@ public:
                     row_pitch,
                     0);
             }
+        }
+        if (mip_levels > 1) {
+            context_->GenerateMips(input_views_.at(index).Get());
         }
     }
 
@@ -593,16 +614,23 @@ private:
         return texture;
     }
 
-    ComPtr<ID3D11Resource> create_input_texture(TextureKind kind) {
+    ComPtr<ID3D11Resource> create_input_texture(const TextureBinding& binding) {
+        const TextureKind kind = binding.kind;
+        const UINT bind_flags = D3D11_BIND_SHADER_RESOURCE
+            | (binding.mip_levels > 1 ? D3D11_BIND_RENDER_TARGET : 0);
+        const UINT generate_mips = binding.mip_levels > 1
+            ? D3D11_RESOURCE_MISC_GENERATE_MIPS
+            : 0;
         if (kind == TextureKind::three_d) {
             D3D11_TEXTURE3D_DESC description{};
             description.Width = options_.width;
             description.Height = options_.height;
             description.Depth = texture_slices(kind);
-            description.MipLevels = 1;
+            description.MipLevels = binding.mip_levels;
             description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
             description.Usage = D3D11_USAGE_DEFAULT;
-            description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            description.BindFlags = bind_flags;
+            description.MiscFlags = generate_mips;
             ComPtr<ID3D11Texture3D> texture;
             check(device_->CreateTexture3D(&description, nullptr, &texture), "CreateTexture3D");
             ComPtr<ID3D11Resource> resource;
@@ -613,14 +641,15 @@ private:
         D3D11_TEXTURE2D_DESC description{};
         description.Width = options_.width;
         description.Height = options_.height;
-        description.MipLevels = 1;
+        description.MipLevels = binding.mip_levels;
         description.ArraySize = texture_slices(kind);
         description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
         description.SampleDesc.Count = 1;
         description.Usage = D3D11_USAGE_DEFAULT;
-        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        description.BindFlags = bind_flags;
+        description.MiscFlags = generate_mips;
         if (kind == TextureKind::cube) {
-            description.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+            description.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
         }
         ComPtr<ID3D11Texture2D> texture;
         check(device_->CreateTexture2D(&description, nullptr, &texture), "Create input Texture2D");
@@ -646,7 +675,7 @@ private:
             "CreatePixelShader candidate");
 
         for (const TextureBinding& binding : options_.textures) {
-            inputs_.push_back(create_input_texture(binding.kind));
+            inputs_.push_back(create_input_texture(binding));
             ComPtr<ID3D11ShaderResourceView> view;
             check(
                 device_->CreateShaderResourceView(
@@ -1111,6 +1140,14 @@ int main(int argc, char** argv) {
             }
             std::cout << "\"" << texture_kind_name(options.textures[index].kind)
                       << "\"";
+        }
+        std::cout << "],\n"
+                  << "  \"texture_mips\": [";
+        for (size_t index = 0; index < options.textures.size(); ++index) {
+            if (index != 0) {
+                std::cout << ", ";
+            }
+            std::cout << options.textures[index].mip_levels;
         }
         std::cout << "],\n"
                   << "  \"samplers\": [";

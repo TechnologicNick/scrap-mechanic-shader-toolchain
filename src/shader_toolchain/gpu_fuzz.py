@@ -160,6 +160,7 @@ def _invoke_harness(
     relative_tolerance: float,
     texture_slots: list[int],
     texture_kinds: list[str],
+    texture_mips: list[int],
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
@@ -188,8 +189,10 @@ def _invoke_harness(
         str(relative_tolerance),
         "--textures",
         ",".join(
-            f"{slot}:{kind}"
-            for slot, kind in zip(texture_slots, texture_kinds, strict=True)
+            f"{slot}:{kind}:{mips}"
+            for slot, kind, mips in zip(
+                texture_slots, texture_kinds, texture_mips, strict=True
+            )
         ),
         "--samplers",
         ",".join(
@@ -258,6 +261,14 @@ def fuzz_semantic_shader(
         raise ToolchainError("texture slots and kinds must have equal lengths")
     if any(kind not in ("2d", "3d", "2darray", "cube") for kind in texture_kinds):
         raise ToolchainError("unsupported texture kind")
+    texture_mips = [
+        int(mips)
+        for mips in execution.get("texture_mips", [1] * len(texture_slots))
+    ]
+    if len(texture_mips) != len(texture_slots) or any(
+        mips < 1 or mips > 13 for mips in texture_mips
+    ):
+        raise ToolchainError("invalid texture mip counts")
     samplers = execution.get(
         "samplers",
         [
@@ -337,6 +348,7 @@ def fuzz_semantic_shader(
             relative_tolerance=0.0,
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
+            texture_mips=texture_mips,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -358,6 +370,7 @@ def fuzz_semantic_shader(
             relative_tolerance=relative_tolerance,
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
+            texture_mips=texture_mips,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -373,6 +386,7 @@ def fuzz_semantic_shader(
         "semantic_execution": {
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
+            "texture_mips": texture_mips,
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,

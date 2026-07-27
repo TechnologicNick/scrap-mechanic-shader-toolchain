@@ -8,6 +8,7 @@ from .copy_auto_hdr import apply_copy_auto_hdr_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .blur_pushmap_a import apply_blur_pushmap_a_recipe
 from .blur_pushmap_b import apply_blur_pushmap_b_recipe
+from .blur_vol_a import apply_blur_vol_a_recipe
 from .copy_blend import apply_copy_blend_recipe
 from .copy_clouds import apply_copy_clouds_recipe
 from .copy_depth import apply_copy_depth_recipe
@@ -55,6 +56,7 @@ RECIPES = (
     apply_blur_pushmap_a_recipe,
     apply_blur_pushmap_b_recipe,
     apply_cube_map_face_present_recipe,
+    apply_blur_vol_a_recipe,
 )
 
 
