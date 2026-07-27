@@ -36,6 +36,7 @@ struct Options {
     uint32_t sampler_slot = 6;
     uint32_t constant_buffer_slot = 5;
     bool point_filter = false;
+    bool depth_output = false;
     bool warp = false;
 };
 
@@ -156,6 +157,13 @@ Options parse_options(int argc, char** argv) {
             } else if (filter != "linear") {
                 throw std::runtime_error("filter must be point or linear");
             }
+        } else if (name == "--output") {
+            const std::string output = value();
+            if (output == "depth") {
+                options.depth_output = true;
+            } else if (output != "color") {
+                throw std::runtime_error("output must be color or depth");
+            }
         } else if (name == "--warp") {
             options.warp = true;
         } else {
@@ -251,16 +259,27 @@ public:
 
     std::vector<float> render(ID3D11PixelShader* shader) {
         constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        context_->ClearRenderTargetView(render_target_view_.Get(), clear);
+        if (options_.depth_output) {
+            context_->ClearDepthStencilView(
+                depth_view_.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+        } else {
+            context_->ClearRenderTargetView(render_target_view_.Get(), clear);
+        }
         context_->PSSetShader(shader, nullptr, 0);
         context_->Draw(3, 0);
-        context_->CopyResource(staging_.Get(), render_target_.Get());
+        context_->CopyResource(
+            staging_.Get(),
+            options_.depth_output
+                ? static_cast<ID3D11Resource*>(depth_target_.Get())
+                : static_cast<ID3D11Resource*>(render_target_.Get()));
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map output");
+        const size_t components = options_.depth_output ? 1 : 4;
         std::vector<float> output(
-            static_cast<size_t>(options_.width) * options_.height * 4);
-        const size_t row_size = static_cast<size_t>(options_.width) * 4 * sizeof(float);
+            static_cast<size_t>(options_.width) * options_.height * components);
+        const size_t row_size =
+            static_cast<size_t>(options_.width) * components * sizeof(float);
         for (uint32_t y = 0; y < options_.height; ++y) {
             std::memcpy(
                 reinterpret_cast<uint8_t*>(output.data()) + y * row_size,
@@ -303,13 +322,14 @@ private:
     ComPtr<ID3D11Texture2D> create_texture(
         D3D11_USAGE usage,
         UINT bind_flags,
-        UINT cpu_flags) {
+        UINT cpu_flags,
+        DXGI_FORMAT format = DXGI_FORMAT_R32G32B32A32_FLOAT) {
         D3D11_TEXTURE2D_DESC description{};
         description.Width = options_.width;
         description.Height = options_.height;
         description.MipLevels = 1;
         description.ArraySize = 1;
-        description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        description.Format = format;
         description.SampleDesc.Count = 1;
         description.Usage = usage;
         description.BindFlags = bind_flags;
@@ -336,15 +356,36 @@ private:
             "CreatePixelShader candidate");
 
         input_ = create_texture(D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0);
-        render_target_ = create_texture(D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
-        staging_ = create_texture(D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
+        if (options_.depth_output) {
+            depth_target_ = create_texture(
+                D3D11_USAGE_DEFAULT,
+                D3D11_BIND_DEPTH_STENCIL,
+                0,
+                DXGI_FORMAT_D32_FLOAT);
+            staging_ = create_texture(
+                D3D11_USAGE_STAGING,
+                0,
+                D3D11_CPU_ACCESS_READ,
+                DXGI_FORMAT_D32_FLOAT);
+            check(
+                device_->CreateDepthStencilView(
+                    depth_target_.Get(), nullptr, &depth_view_),
+                "CreateDepthStencilView");
+        } else {
+            render_target_ = create_texture(
+                D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
+            staging_ = create_texture(
+                D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
+        }
         check(
             device_->CreateShaderResourceView(input_.Get(), nullptr, &input_view_),
             "CreateShaderResourceView");
-        check(
-            device_->CreateRenderTargetView(
-                render_target_.Get(), nullptr, &render_target_view_),
-            "CreateRenderTargetView");
+        if (!options_.depth_output) {
+            check(
+                device_->CreateRenderTargetView(
+                    render_target_.Get(), nullptr, &render_target_view_),
+                "CreateRenderTargetView");
+        }
 
         D3D11_BUFFER_DESC buffer_description{};
         buffer_description.ByteWidth = 62 * 16;
@@ -385,6 +426,17 @@ private:
                 &rasterizer_description, &rasterizer_state_),
             "CreateRasterizerState");
 
+        if (options_.depth_output) {
+            D3D11_DEPTH_STENCIL_DESC depth_description{};
+            depth_description.DepthEnable = TRUE;
+            depth_description.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+            depth_description.DepthFunc = D3D11_COMPARISON_ALWAYS;
+            check(
+                device_->CreateDepthStencilState(
+                    &depth_description, &depth_state_),
+                "CreateDepthStencilState");
+        }
+
         D3D11_VIEWPORT viewport{};
         viewport.Width = static_cast<float>(options_.width);
         viewport.Height = static_cast<float>(options_.height);
@@ -403,7 +455,12 @@ private:
         context_->PSSetSamplers(options_.sampler_slot, 1, &sampler);
         context_->RSSetState(rasterizer_state_.Get());
         context_->RSSetViewports(1, &viewport);
-        context_->OMSetRenderTargets(1, &target, nullptr);
+        if (options_.depth_output) {
+            context_->OMSetDepthStencilState(depth_state_.Get(), 0);
+            context_->OMSetRenderTargets(0, nullptr, depth_view_.Get());
+        } else {
+            context_->OMSetRenderTargets(1, &target, nullptr);
+        }
     }
 
     const Options& options_;
@@ -416,12 +473,15 @@ private:
     ComPtr<ID3D11PixelShader> candidate_shader_;
     ComPtr<ID3D11Texture2D> input_;
     ComPtr<ID3D11Texture2D> render_target_;
+    ComPtr<ID3D11Texture2D> depth_target_;
     ComPtr<ID3D11Texture2D> staging_;
     ComPtr<ID3D11ShaderResourceView> input_view_;
     ComPtr<ID3D11RenderTargetView> render_target_view_;
+    ComPtr<ID3D11DepthStencilView> depth_view_;
     ComPtr<ID3D11Buffer> constant_buffer_;
     ComPtr<ID3D11SamplerState> sampler_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
+    ComPtr<ID3D11DepthStencilState> depth_state_;
 };
 
 std::string fill_case(
@@ -527,10 +587,12 @@ Comparison compare_outputs(
     const std::vector<float>& baseline,
     const std::vector<float>& candidate,
     double absolute_tolerance,
-    double relative_tolerance) {
+    double relative_tolerance,
+    size_t components_per_pixel) {
     Comparison result;
     result.compared_values = baseline.size();
-    std::vector<bool> differing_pixels(baseline.size() / 4, false);
+    std::vector<bool> differing_pixels(
+        baseline.size() / components_per_pixel, false);
     for (size_t index = 0; index < baseline.size(); ++index) {
         const float first = baseline[index];
         const float second = candidate[index];
@@ -569,7 +631,7 @@ Comparison compare_outputs(
         if (!finite_match) {
             result.passed = false;
             ++result.differing_values;
-            differing_pixels[index / 4] = true;
+            differing_pixels[index / components_per_pixel] = true;
         }
     }
     result.differing_pixels = static_cast<uint64_t>(std::count(
@@ -601,8 +663,9 @@ void preserve_failure(
     }
     std::filesystem::create_directories(options.failure_dir);
     write_raw(options.failure_dir / "input.rgba32f", input);
-    write_raw(options.failure_dir / "baseline.rgba32f", baseline);
-    write_raw(options.failure_dir / "candidate.rgba32f", candidate);
+    const char* output_name = options.depth_output ? "depth.r32f" : "color.rgba32f";
+    write_raw(options.failure_dir / ("baseline." + std::string(output_name)), baseline);
+    write_raw(options.failure_dir / ("candidate." + std::string(output_name)), candidate);
     std::filesystem::copy_file(
         options.vertex,
         options.failure_dir / "vertex.dxbc",
@@ -625,6 +688,8 @@ void preserve_failure(
            << "  \"height\": " << options.height << ",\n"
            << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
            << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+           << "  \"output\": \""
+           << (options.depth_output ? "depth" : "color") << "\",\n"
            << "  \"max_absolute_error\": " << comparison.max_absolute_error << ",\n"
            << "  \"max_relative_error\": " << comparison.max_relative_error << ",\n"
            << "  \"max_ulp_error\": " << comparison.max_ulp_error << ",\n"
@@ -662,7 +727,8 @@ int main(int argc, char** argv) {
                 baseline,
                 candidate,
                 options.absolute_tolerance,
-                options.relative_tolerance);
+                options.relative_tolerance,
+                options.depth_output ? 1 : 4);
             ++tested_cases;
             exact_values += comparison.exact_values;
             compared_values += comparison.compared_values;
@@ -708,6 +774,8 @@ int main(int argc, char** argv) {
                   << options.constant_buffer_slot << ",\n"
                   << "  \"filter\": \""
                   << (options.point_filter ? "point" : "linear") << "\",\n"
+                  << "  \"output\": \""
+                  << (options.depth_output ? "depth" : "color") << "\",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
                   << "  \"exact_values\": " << exact_values << ",\n"
                   << "  \"max_absolute_error\": " << max_absolute_error << ",\n"

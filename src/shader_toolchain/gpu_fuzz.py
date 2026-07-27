@@ -127,6 +127,7 @@ def _invoke_harness(
     sampler_slot: int,
     constant_buffer_slot: int,
     texture_filter: str,
+    output_kind: str,
     failure_dir: Path | None,
     warp: bool,
 ) -> dict[str, Any]:
@@ -158,6 +159,8 @@ def _invoke_harness(
         str(constant_buffer_slot),
         "--filter",
         texture_filter,
+        "--output",
+        output_kind,
     ]
     if failure_dir is not None:
         command.extend(("--failure-dir", str(failure_dir)))
@@ -204,8 +207,11 @@ def fuzz_semantic_shader(
     sampler_slot = int(execution.get("sampler_slot", 6))
     constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
     texture_filter = str(execution.get("filter", "linear"))
+    output_kind = str(execution.get("output", "color"))
     if texture_filter not in ("point", "linear"):
         raise ToolchainError(f"unsupported texture filter: {texture_filter}")
+    if output_kind not in ("color", "depth"):
+        raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
     baseline_path = corpus / pixel["dxbc_path"]
@@ -248,6 +254,7 @@ def fuzz_semantic_shader(
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
             texture_filter=texture_filter,
+            output_kind=output_kind,
             failure_dir=None,
             warp=warp,
         )
@@ -268,6 +275,7 @@ def fuzz_semantic_shader(
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
             texture_filter=texture_filter,
+            output_kind=output_kind,
             failure_dir=failure_dir,
             warp=warp,
         )
@@ -282,6 +290,7 @@ def fuzz_semantic_shader(
             "sampler_slot": sampler_slot,
             "constant_buffer_slot": constant_buffer_slot,
             "filter": texture_filter,
+            "output": output_kind,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),
