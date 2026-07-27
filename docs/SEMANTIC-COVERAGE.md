@@ -55,6 +55,11 @@ The semantic corpus has two deliberate readability levels:
   recipes. `post_volumetric` now shares one source for its medium/high modes;
   its complete cone intersection, march, cookie, and shadow path uses typed
   helpers and exact reflected ABI includes.
+- Hybrid structural implementations recover stable data formats and repeated
+  algorithms as typed helpers while retaining instruction order in the
+  pass-specific orchestration. `ssgi_cascade` uses this level for its 6:5:5
+  YCoCg codec, depth representation, view-position reconstruction, and
+  plane/distance-aware bilateral weights.
 - Instruction-ordered semantic implementations preserve the recovered
   arithmetic sequence but replace anonymous register state with stable domain
   names and document the algorithm phases. This applies to the largest or most
@@ -100,6 +105,20 @@ domain because independently compiled DXBC can differ in quad-lane and triangle
 edge ordering on larger synthetic targets. That domain still varies textures,
 constant buffers, samplers, structured inputs, branches, and arithmetic while
 removing undefined spatial ordering from the comparison.
+
+The SSGI cascade is intentionally not in that reduced domain. Its four pass
+permutations use 8x8 spatially varying, channel-independent textures so Gather
+footprint order, scaled versus unscaled UVs, normal rejection, and parent-level
+offsets are observable. A dedicated fixture supplies valid cascade depths and
+periodic far-depth inputs. The four selectors pass 256 cases bit-exactly
+(131,072 compared values), and compile-time canaries prove the packed decoder,
+bilateral helper, far-depth exit, packed encoder where applicable, and each
+downsample/final/upscale pass are reached.
+The integration corpus digest for this audit is
+`ec36afba68cb0791ab71e4a891a32f4f1829e6d740c99997ac5ee9866e0ba472`.
+Two independent forced 32-worker builds compiled all 4,141 selectors with zero
+fallbacks and produced identical caches with SHA-256
+`7ffde1f127c83ce413d802fc5329cfcb5d6b762bb524a1b8f0e4df884d87b118`.
 
 Pixel-stage structured buffers are bound independently from ordinary textures
 by the native runner. The volumetric campaign supplies coherent 17-word light

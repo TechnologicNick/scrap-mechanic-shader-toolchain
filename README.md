@@ -296,6 +296,18 @@ uv run python scripts/check-volumetric-coverage.py .\output --cases 256
 The canaries are compile-time probes only; they do not modify the reconstructed
 corpus or the maintained semantic HLSL.
 
+`ssgi_cascade.hlsl` recovers the cascade's normalized 16-bit 6:5:5 YCoCg
+indirect-light codec and its plane/distance-aware bilateral rejection as typed
+helpers. Its differential fixture uses spatially varying 8x8 inputs with
+independent channels, preserves the native/HLSL Gather lane mapping, and adds
+explicit far-depth cases. Run both the bit-exact campaign and its path canaries:
+
+```powershell
+uv run python scripts/fuzz-module-batch.py .\output ssgi_cascade `
+  --count 4 --cases 256
+uv run python scripts/check-ssgi-cascade-coverage.py .\output --cases 256
+```
+
 The adjacent `rebuilt-shaders.sbc.build.json` classifies every selector. Edited
 branches also receive deterministic Microsoft assembly diffs under
 `rebuilt-shaders.sbc.diffs/`. An explicitly coordinated engine-side ABI change
