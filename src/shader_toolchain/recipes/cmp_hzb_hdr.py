@@ -94,4 +94,5 @@ def apply_cmp_hzb_hdr_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="cmp_hzb_hdr", bodies=bodies, executions=executions,
+        shared_source=source,
     )

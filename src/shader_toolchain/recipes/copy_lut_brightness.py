@@ -67,4 +67,5 @@ def apply_copy_lut_brightness_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="copy_lut_brightness", bodies=bodies, executions=executions,
+        shared_source=source,
     )

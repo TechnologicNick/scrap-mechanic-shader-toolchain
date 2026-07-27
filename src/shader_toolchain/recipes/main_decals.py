@@ -85,4 +85,11 @@ def apply_main_decals_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="main_decals", bodies=bodies, executions=executions,
+        shared_source=(
+            "#if defined(VERTEX_SHADER)\n" +
+            asset("main_decals_vertex.hlsl") +
+            "#elif defined(PIXEL_SHADER)\n" +
+            asset("main_decals_pixel.hlsl") +
+            "#endif\n"
+        ),
     )

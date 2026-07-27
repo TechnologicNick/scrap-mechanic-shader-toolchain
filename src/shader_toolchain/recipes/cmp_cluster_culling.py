@@ -66,4 +66,5 @@ def apply_cmp_cluster_culling_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="cmp_cluster_culling", bodies=bodies, executions=executions,
+        shared_source=body,
     )

@@ -92,4 +92,11 @@ def apply_post_smaa_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_smaa", bodies=bodies, executions=executions,
+        shared_source=(
+            "#if defined(VERTEX_SHADER)\n" +
+            asset("post_smaa_vertex.hlsl") +
+            "#elif defined(PIXEL_SHADER)\n" +
+            asset("post_smaa_pixel.hlsl") +
+            "#endif\n"
+        ),
     )

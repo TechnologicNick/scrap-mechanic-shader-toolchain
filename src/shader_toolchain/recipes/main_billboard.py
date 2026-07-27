@@ -57,4 +57,11 @@ def apply_main_billboard_recipe(
         recipe_name="main_billboard",
         bodies=bodies,
         executions=executions,
+        shared_source=(
+            "#if defined(VERTEX_SHADER)\n" +
+            asset("main_billboard_vertex.hlsl") +
+            "#elif defined(PIXEL_SHADER)\n" +
+            asset("main_billboard_pixel.hlsl") +
+            "#endif\n"
+        ),
     )
