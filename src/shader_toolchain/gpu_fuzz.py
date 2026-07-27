@@ -1034,7 +1034,7 @@ def fuzz_semantic_shader(
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
         or binding["stride"] < 4 or binding["stride"] % 4
-        or binding["profile"] not in ("random", "zero")
+        or binding["profile"] not in ("random", "zero", "volumetric")
         for binding in structured_inputs
     ) or any(
         binding["slot"] < 0 or binding["elements"] < 1
@@ -1098,7 +1098,8 @@ def fuzz_semantic_shader(
             "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
             "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr",
             "cloud", "cluster-culling",
-            "hzb", "godrays",
+            "hzb", "godrays", "volumetric-cluster", "volumetric-lights",
+            "volumetric-frame",
         )
         for binding in constant_buffers
     ):

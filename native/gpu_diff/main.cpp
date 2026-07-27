@@ -40,6 +40,9 @@ enum class ConstantProfile {
     cluster_culling,
     hzb,
     godrays,
+    volumetric_cluster,
+    volumetric_lights,
+    volumetric_frame,
 };
 
 struct ConstantBinding {
@@ -76,6 +79,7 @@ struct TextureBinding {
 enum class StructuredInputProfile {
     random,
     zero,
+    volumetric,
 };
 
 struct StructuredInputBinding {
@@ -225,8 +229,19 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "cluster-culling") return ConstantProfile::cluster_culling;
     if (profile == "hzb") return ConstantProfile::hzb;
     if (profile == "godrays") return ConstantProfile::godrays;
+    if (profile == "volumetric-cluster") return ConstantProfile::volumetric_cluster;
+    if (profile == "volumetric-lights") return ConstantProfile::volumetric_lights;
+    if (profile == "volumetric-frame") return ConstantProfile::volumetric_frame;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
+}
+
+StructuredInputProfile parse_structured_input_profile(
+    const std::string& profile) {
+    if (profile == "random") return StructuredInputProfile::random;
+    if (profile == "zero") return StructuredInputProfile::zero;
+    if (profile == "volumetric") return StructuredInputProfile::volumetric;
+    throw std::runtime_error("unknown structured input profile: " + profile);
 }
 
 StructuredOutputProfile parse_structured_output_profile(
@@ -257,6 +272,9 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::cloud: return "cloud";
     case ConstantProfile::cluster_culling: return "cluster-culling";
     case ConstantProfile::hzb: return "hzb";
+    case ConstantProfile::volumetric_cluster: return "volumetric-cluster";
+    case ConstantProfile::volumetric_lights: return "volumetric-lights";
+    case ConstantProfile::volumetric_frame: return "volumetric-frame";
     }
     return "unknown";
 }
@@ -403,9 +421,9 @@ Options parse_options(int argc, char** argv) {
                         parse_u64(binding.substr(
                             second + 1, third == std::string::npos
                                 ? std::string::npos : third - second - 1))),
-                    third != std::string::npos && binding.substr(third + 1) == "zero"
-                        ? StructuredInputProfile::zero
-                        : StructuredInputProfile::random,
+                    parse_structured_input_profile(
+                        third == std::string::npos
+                            ? "random" : binding.substr(third + 1)),
                 });
             }
         } else if (name == "--smooth-texture-slots") {
@@ -860,6 +878,98 @@ public:
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
             std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::volumetric_cluster) {
+            const uint32_t one = 1;
+            std::memcpy(&constants[1 * 4 + 0], &one, sizeof(one));
+            constants[3 * 4 + 0] = 1.0f;
+            constants[3 * 4 + 1] = 1.0f;
+            constants[3 * 4 + 2] = 1.0f;
+            constants[3 * 4 + 3] = 1.0f;
+            constants[4 * 4 + 0] = 1.0f;
+            constants[4 * 4 + 1] = 1.0f;
+            constants[4 * 4 + 2] = 1.0f;
+            constants[5 * 4 + 0] = 1.0f;
+            constants[5 * 4 + 1] = 1.0f;
+            constants[5 * 4 + 2] = 16.0f;
+            constants[5 * 4 + 3] = 16.0f;
+            constants[6 * 4 + 0] = 1.0f / 16.0f;
+            constants[6 * 4 + 1] = 1.0f / 16.0f;
+            constants[6 * 4 + 2] = 100.0f;
+            constants[6 * 4 + 3] = 1.0f;
+        } else if (profile == ConstantProfile::volumetric_lights) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            const uint32_t scenario = case_index % 8;
+            const auto set_uint = [&](size_t offset, uint32_t value) {
+                std::memcpy(&constants[offset], &value, sizeof(value));
+            };
+            const auto initialize_sphere = [&](uint32_t index) {
+                float* light = constants.data() + index * 12;
+                light[0] = 0.15f * (random.unit() - 0.5f);
+                light[1] = 0.15f * (random.unit() - 0.5f);
+                light[2] = -5.0f;
+                light[3] = -75.0f;
+                set_uint(index * 12 + 4, 0xff906000u);
+                light[5] = 1.0f;
+                light[6] = 2.0f;
+                light[7] = 2.0f;
+                light[8] = 0.08f;
+                light[9] = 0.08f;
+            };
+            const auto initialize_cone = [&](uint32_t index) {
+                float* light = constants.data() + (765 + index * 40);
+                light[0] = 0.0f;
+                light[1] = 0.0f;
+                light[2] = -5.0f;
+                light[3] = 0.1f;
+                light[4] = 0.0f;
+                light[5] = 0.0f;
+                light[6] = 1.0f;
+                light[7] = 1.0f;
+                light[8] = 0.0f;
+                light[9] = 0.1f;
+                light[10] = -5.0f;
+                light[11] = 20.0f;
+                uint32_t flags = 0xff906000u;
+                if (scenario == 5 || scenario == 7) flags |= 0x10u;
+                set_uint(765 + index * 40 + 12, flags);
+                light[13] = 1.0f;
+                light[14] = 0.0f;
+                light[15] = 2.0f;
+                light[16] = 2.0f;
+                light[17] = 0.25f;
+                light[18] = 0.0f;
+                light[19] = 1.0f;
+                light[20] = 1.0f;
+                light[25] = 1.0f;
+                light[30] = 1.0f;
+                light[35] = 1.0f;
+                light[36] = 0.0f;
+                light[37] = 0.0f;
+                light[38] = scenario == 6 || scenario == 7 ? 0.25f : 0.0f;
+                light[39] = 0.15f;
+            };
+            initialize_sphere(0);
+            initialize_sphere(1);
+            initialize_sphere(32);
+            initialize_cone(0);
+            initialize_cone(1);
+            initialize_cone(32);
+        } else if (profile == ConstantProfile::volumetric_frame) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            constants[7 * 4 + 0] = random.unit();
+            constants[8 * 4 + 2] = 0.8f + random.unit() * 0.2f;
+            constants[51 * 4 + 3] = random.unit();
+            constants[52 * 4 + 0] = random.unit() * 0.25f;
+            constants[52 * 4 + 1] = random.unit() * 0.25f;
+            constants[52 * 4 + 2] = random.unit() * 0.25f;
+            constants[52 * 4 + 3] = 0.5f;
+            constants[53 * 4 + 0] = 0.08f;
+            constants[53 * 4 + 1] = 0.08f;
+            constants[53 * 4 + 2] = 0.08f;
+            constants[53 * 4 + 3] = 1.0f;
+            constants[54 * 4 + 0] = 1.0f;
         } else if (profile == ConstantProfile::ao) {
             constants[3 * 4 + 0] = 1.0f;
             constants[3 * 4 + 1] = 1.0f;
@@ -1559,6 +1669,8 @@ private:
         for (size_t index = 0; index < options_.structured_inputs.size(); ++index) {
             ID3D11ShaderResourceView* input_view =
                 structured_input_views_[index].Get();
+            context_->PSSetShaderResources(
+                options_.structured_inputs[index].slot, 1, &input_view);
             context_->CSSetShaderResources(
                 options_.structured_inputs[index].slot, 1, &input_view);
         }
@@ -1935,9 +2047,31 @@ int main(int argc, char** argv) {
             }
             for (size_t resource = 0; resource < structured_inputs.size(); ++resource) {
                 auto& values = structured_inputs[resource];
-                if (options.structured_inputs[resource].profile
-                    == StructuredInputProfile::zero) {
+                const auto profile = options.structured_inputs[resource].profile;
+                if (profile == StructuredInputProfile::zero) {
                     std::fill(values.begin(), values.end(), 0u);
+                } else if (profile == StructuredInputProfile::volumetric) {
+                    std::fill(values.begin(), values.end(), 0u);
+                    if (values.size() < 17) {
+                        throw std::runtime_error(
+                            "volumetric structured input needs 17 uint elements");
+                    }
+                    switch (index % 8) {
+                    case 1: values[0] = 0x001u; values[1] = 0x1u; break;
+                    case 2: values[0] = 0x100u; values[9] = 0x1u; break;
+                    case 3:
+                        values[0] = 0x101u; values[1] = 0x1u; values[9] = 0x1u;
+                        break;
+                    case 4: values[0] = 0x002u; values[2] = 0x1u; break;
+                    case 5: values[0] = 0x200u; values[10] = 0x1u; break;
+                    case 6:
+                        values[0] = 0x202u; values[2] = 0x1u; values[10] = 0x1u;
+                        break;
+                    case 7:
+                        values[0] = 0x101u; values[1] = 0x3u; values[9] = 0x3u;
+                        break;
+                    default: break;
+                    }
                 } else if (index == 0) {
                     std::fill(values.begin(), values.end(), 0u);
                 } else if (index == 1) {
