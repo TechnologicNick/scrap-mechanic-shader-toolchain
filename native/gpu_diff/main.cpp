@@ -122,6 +122,7 @@ struct Options {
     bool depth_output = false;
     uint32_t output_components = 4;
     uint32_t output_targets = 1;
+    std::vector<uint32_t> output_target_components;
     std::array<uint32_t, 3> thread_group = {1, 1, 1};
     bool warp = false;
 };
@@ -510,6 +511,14 @@ Options parse_options(int argc, char** argv) {
             options.output_components = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--output-targets") {
             options.output_targets = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--output-target-components") {
+            options.output_target_components.clear();
+            std::stringstream components(value());
+            std::string component;
+            while (std::getline(components, component, ',')) {
+                options.output_target_components.push_back(
+                    static_cast<uint32_t>(parse_u64(component)));
+            }
         } else if (name == "--thread-group") {
             std::stringstream values(value());
             std::string component;
@@ -545,6 +554,18 @@ Options parse_options(int argc, char** argv) {
             options.thread_group.begin(), options.thread_group.end(),
             [](uint32_t value) { return value == 0; })) {
         throw std::runtime_error("output components and thread-group sizes must be positive");
+    }
+    if (options.output_target_components.empty()) {
+        options.output_target_components.assign(
+            options.output_targets, options.output_components);
+    }
+    if (options.output_target_components.size() != options.output_targets
+        || std::any_of(
+            options.output_target_components.begin(),
+            options.output_target_components.end(),
+            [](uint32_t value) { return value == 0 || value > 4; })) {
+        throw std::runtime_error(
+            "output target components must provide one 1..4 value per target");
     }
     if (options.stage == ShaderStage::compute && options.depth_output) {
         throw std::runtime_error("compute stage does not support depth output");
@@ -1094,7 +1115,8 @@ public:
                 check(context_->Map(
                     staging_targets_[target].Get(), 0, D3D11_MAP_READ, 0, &mapped),
                     "Map color output");
-                const size_t components = options_.output_components;
+                const size_t components =
+                    options_.output_target_components[target];
                 const size_t old_size = output.size();
                 output.resize(old_size + static_cast<size_t>(options_.width)
                     * options_.height * components);
@@ -1144,8 +1166,8 @@ public:
     }
 
 private:
-    DXGI_FORMAT output_format() const {
-        switch (options_.output_components) {
+    static DXGI_FORMAT output_format(uint32_t components) {
+        switch (components) {
         case 1: return DXGI_FORMAT_R32_FLOAT;
         case 2: return DXGI_FORMAT_R32G32_FLOAT;
         // D3D11 does not permit R32G32B32_FLOAT render targets/UAVs. Store an
@@ -1331,10 +1353,10 @@ private:
                 for (uint32_t index = 0; index < options_.output_targets; ++index) {
                     compute_targets_.push_back(create_texture(
                         D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0,
-                        output_format()));
+                        output_format(options_.output_target_components[index])));
                     staging_targets_.push_back(create_texture(
                         D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ,
-                        output_format()));
+                        output_format(options_.output_target_components[index])));
                     ComPtr<ID3D11UnorderedAccessView> view;
                     check(device_->CreateUnorderedAccessView(
                         compute_targets_.back().Get(), nullptr, &view),
@@ -1361,10 +1383,10 @@ private:
             for (uint32_t index = 0; index < options_.output_targets; ++index) {
                 render_targets_.push_back(create_texture(
                     D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0,
-                    output_format()));
+                    output_format(options_.output_target_components[index])));
                 staging_targets_.push_back(create_texture(
                     D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ,
-                    output_format()));
+                    output_format(options_.output_target_components[index])));
                 ComPtr<ID3D11RenderTargetView> view;
                 check(device_->CreateRenderTargetView(
                     render_targets_.back().Get(), nullptr, &view),

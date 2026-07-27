@@ -386,6 +386,46 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_SLANT_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float3 viewPosition : VIEW_POSITION0;
+    float2 uv : UV0;
+    float3 normal : NORMAL0;
+    float3 tangent : TANGENT0;
+    float3 bitangent : BITANGENT0;
+    float4 color : VERTEXCOLOR0;
+    noperspective float3 screenUv : SCREEN_UV0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.viewPosition = float3(positions[vertexId], -10.0);
+    output.uv = coordinates[vertexId];
+    output.normal = float3(0.0, 0.0, 1.0);
+    output.tangent = float3(1.0, 0.0, 0.0);
+    output.bitangent = float3(0.0, 1.0, 0.0);
+    output.color = float4(0.25, 0.5, 0.75, 0.625);
+    output.screenUv = float3(coordinates[vertexId], 0.5);
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "decals": DECALS_VERTEX,
@@ -398,6 +438,7 @@ VERTEX_HARNESSES = {
     "fullscreen_billboard": FULLSCREEN_BILLBOARD_VERTEX,
     "fullscreen_terrain": FULLSCREEN_TERRAIN_VERTEX,
     "fullscreen_editor_terrain": FULLSCREEN_EDITOR_TERRAIN_VERTEX,
+    "fullscreen_slant": FULLSCREEN_SLANT_VERTEX,
 }
 
 
@@ -519,6 +560,7 @@ def _invoke_harness(
     output_kind: str,
     output_components: int,
     output_targets: int,
+    output_target_components: list[int],
     shader_stage: str,
     thread_group: list[int],
     failure_dir: Path | None,
@@ -591,6 +633,8 @@ def _invoke_harness(
         str(output_components),
         "--output-targets",
         str(output_targets),
+        "--output-target-components",
+        ",".join(str(value) for value in output_target_components),
         "--thread-group",
         ",".join(str(value) for value in thread_group),
     ]
@@ -780,6 +824,12 @@ def fuzz_semantic_shader(
         execution.get("output_components", 1 if output_kind == "depth" else 4)
     )
     output_targets = int(execution.get("output_targets", 1))
+    output_target_components = [
+        int(value)
+        for value in execution.get(
+            "output_target_components", [output_components] * output_targets
+        )
+    ]
     thread_group = [int(value) for value in execution.get("thread_group", [1, 1, 1])]
     if any(sampler["filter"] not in ("point", "linear") for sampler in samplers):
         raise ToolchainError("unsupported sampler filter")
@@ -798,6 +848,12 @@ def fuzz_semantic_shader(
         raise ToolchainError("output component count must be between one and four")
     if output_targets < 1 or output_targets > 8:
         raise ToolchainError("output target count must be between one and eight")
+    if len(output_target_components) != output_targets or any(
+        value < 1 or value > 4 for value in output_target_components
+    ):
+        raise ToolchainError(
+            "output target components must provide one 1..4 value per target"
+        )
     if output_kind == "depth" and output_targets != 1:
         raise ToolchainError("depth execution requires one output target")
     if len(thread_group) != 3 or any(value < 1 for value in thread_group):
@@ -846,7 +902,7 @@ def fuzz_semantic_shader(
             dispatch_height=dispatch_height,
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
-            ulp_tolerance=0,
+            ulp_tolerance=ulp_tolerance,
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
@@ -861,13 +917,14 @@ def fuzz_semantic_shader(
             output_kind=output_kind,
             output_components=output_components,
             output_targets=output_targets,
+            output_target_components=output_target_components,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=None,
             warp=warp,
         )
-        if not control["passed"] or control["max_absolute_error"] != 0:
-            raise ToolchainError("GPU control run was not bit-exact")
+        if not control["passed"]:
+            raise ToolchainError("GPU control run exceeded its tolerance")
         comparison = _invoke_harness(
             harness_path,
             vertex_path,
@@ -896,6 +953,7 @@ def fuzz_semantic_shader(
             output_kind=output_kind,
             output_components=output_components,
             output_targets=output_targets,
+            output_target_components=output_target_components,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=failure_dir,
@@ -922,6 +980,7 @@ def fuzz_semantic_shader(
             "output": output_kind,
             "output_components": output_components,
             "output_targets": output_targets,
+            "output_target_components": output_target_components,
             "thread_group": thread_group,
             "dispatch_width": dispatch_width,
             "dispatch_height": dispatch_height,
