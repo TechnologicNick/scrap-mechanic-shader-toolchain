@@ -46,6 +46,7 @@ from .main_text import apply_main_text_recipe
 from .main_terrain_surface import apply_main_terrain_surface_recipe
 from .main_editor_terrain_surface import apply_main_editor_terrain_surface_recipe
 from .main_line import apply_main_line_recipe
+from .main_impostor import apply_main_impostor_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
@@ -102,6 +103,7 @@ RECIPES = (
     apply_main_terrain_surface_recipe,
     apply_main_editor_terrain_surface_recipe,
     apply_main_line_recipe,
+    apply_main_impostor_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
     apply_cmp_auto_hdr_recipe,
     apply_cmp_depth_bounds_recipe,

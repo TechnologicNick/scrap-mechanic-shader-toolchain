@@ -142,6 +142,38 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_IMPOSTOR_VERTEX = """
+struct VertexOutput
+{
+    float4 position : SV_Position0;
+    float4 atlasUv : TEXCOORD0;
+    nointerpolation float atlasLayer : TEXCOORD1;
+    linear noperspective centroid float4 screenUv : TEXCOORD2;
+    nointerpolation float facingSlice : TEXCOORD3;
+    nointerpolation float4 blendSlices : TEXCOORD4;
+    nointerpolation float3 blendWeights : TEXCOORD5;
+    nointerpolation uint packedData : TEXCOORD6;
+};
+
+VertexOutput harnessVS(uint vertexId : SV_VertexID)
+{
+    float2 positions[3] = {
+        float2(-1.0, -1.0), float2(-1.0, 3.0), float2(3.0, -1.0)
+    };
+    VertexOutput output;
+    float2 p = positions[vertexId];
+    output.position = float4(p, 0.5, 1.0);
+    output.atlasUv = float4(p * float2(0.5, -0.5) + 0.5, 0.0, 0.0);
+    output.atlasLayer = (float)(vertexId & 3u);
+    output.screenUv = float4(output.atlasUv.xy, 0.0, 1.0);
+    output.facingSlice = 0.0;
+    output.blendSlices = float4(0.0, 1.0, 2.0, 3.0);
+    output.blendWeights = float3(0.25, 0.5, 0.75);
+    output.packedData = 0x7f804020u + vertexId;
+    return output;
+}
+"""
+
 FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -335,6 +367,7 @@ VERTEX_HARNESSES = {
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
     "fullscreen_line": FULLSCREEN_LINE_VERTEX,
+    "fullscreen_impostor": FULLSCREEN_IMPOSTOR_VERTEX,
     "fullscreen_clutter_impostor": FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX,
     "fullscreen_text": FULLSCREEN_TEXT_VERTEX,
     "fullscreen_billboard": FULLSCREEN_BILLBOARD_VERTEX,
