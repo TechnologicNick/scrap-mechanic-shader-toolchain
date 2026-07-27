@@ -54,6 +54,7 @@ from .post_depth_to_pushmap import apply_post_depth_to_pushmap_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 from .post_sky import apply_post_sky_recipe
+from .post_smaa import apply_post_smaa_recipe
 from .save_paused import apply_save_paused_recipe
 from .upres_clouds import apply_upres_clouds_recipe
 from .ssgi_prepass import apply_ssgi_prepass_recipe
@@ -113,6 +114,7 @@ RECIPES = (
     apply_cube_map_composition_recipe,
     apply_cube_map_face_composition_recipe,
     apply_post_sky_recipe,
+    apply_post_smaa_recipe,
     apply_ssgi_prepass_recipe,
     apply_ssgi_denoise_recipe,
     apply_cmp_normal_mips_recipe,
