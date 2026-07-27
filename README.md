@@ -70,8 +70,9 @@ branch's `SM_SHADER_<16-hex-digit-key>` symbol and use the entry point shown in
 its adjacent comment or manifest record when compiling a particular lift.
 `manifest.json` records every cache job, shader key, original descriptor and
 define set, stage, entry point, resource-ID association, DXBC hash, lift backend,
-and lift status. The `dxbc/` directory retains the exact executable programs as
-a safety net for branches that a decompiler cannot express as compilable HLSL.
+and lift status. It also records a comment/whitespace-insensitive token
+fingerprint for each branch. The `dxbc/` directory retains the exact executable
+programs as the lossless baseline.
 
 3DMigoto lifts 4,131 programs in the validated cache. Its decompiler rejects ten
 unusual compute programs; these are retained using DXDecompiler and explicitly
@@ -92,14 +93,11 @@ also prints a SHA-256 digest over every relative path and byte in the corpus.
 
 For the cache with SHA-256
 `d29a016093ec82099f34ebbff852d102d737c8efc0e28eec08bdfea1e205651f`, two
-independent clean runs produced this output digest:
+the current v2 corpus has this output digest:
 
 ```text
-df45cede1806eb7da3da2f56ecd38832d0cd3f4ea4427b5b3b972e51222569ea
+77aa3c70f9fd46d3ceeb9d33825a45bbc6ffb16464244d813081327b82644445
 ```
-
-Corpora produced by the current version also include exact DXBC sidecars, so
-their complete digest differs from this earlier HLSL-and-manifest-only result.
 
 ## Compile HLSL back to `shaders.sbc`
 
@@ -115,36 +113,49 @@ not affect the output. Override the worker count when desired:
 uv run sm-shaders build --jobs 8 .\output .\rebuilt-shaders.sbc
 ```
 
-The build splits the 80 modules into selector branches, compiles each branch
-with its recovered entry point and Shader Model 5 profile, packages the results
-with `D3DCompressShaders`, recreates every metadata table, and writes a valid
-GenericCache raw-LZ4 envelope. It then reopens the result and decompresses all
-4,141 shaders before publishing the output.
+The default build is content-aware. Comments and formatting do not count as an
+edit. An unchanged selector uses its hash-verified original DXBC, while a branch
+whose HLSL tokens changed is compiled with its recovered entry point and Shader
+Model 5 profile. Edited shaders must preserve their reflected runtime ABI:
+signatures, resource bindings, constant-buffer layouts, and compute thread-group
+dimensions. Compilation errors and ABI changes are fatal and never silently
+fall back to the old shader.
 
-When decompiler-generated HLSL does not compile, normal mode uses that branch's
-exact recovered DXBC. The adjacent `rebuilt-shaders.sbc.build.json` report lists
-every fallback and its stable compiler diagnostic. Use strict mode to reject
-all fallbacks:
+The adjacent `rebuilt-shaders.sbc.build.json` classifies every selector. Edited
+branches also receive deterministic Microsoft assembly diffs under
+`rebuilt-shaders.sbc.diffs/`. An explicitly coordinated engine-side ABI change
+can be allowed with:
 
 ```powershell
-uv run sm-shaders build --strict .\output .\rebuilt-shaders.sbc
+uv run sm-shaders build --allow-interface-changes .\output .\rebuilt-shaders.sbc
 ```
 
-Strict mode is useful while repairing individual lifts. The unmodified recovered
-corpus is not strict-clean: 2,649 branches compile and 1,492 use exact-DXBC
-fallback. A modified branch that compiles is always placed in the new cache; a
-modified branch with a compiler error falls back unless strict mode is selected.
+For decompiler research, force every branch through the compiler with
+`--recompile-all`. Add `--allow-dxbc-fallback` to retain exact originals for
+decompiler output that does not compile. The deprecated `--strict` flag is an
+alias for `--recompile-all`.
 
-For the validated corpus, two independent 32-worker builds produced the same
-3,357,810-byte cache with SHA-256:
+For the untouched validated corpus, the lossless build performs zero HLSL
+compilations and classifies all 4,141 branches as `unchanged-exact`. Its cache
+SHA-256 is:
 
 ```text
-4a5d867150786c302be46a5aca67f0a56e4f5efef81ba7b053666be9a7ef294d
+9d7c6d7a753def3b5435faa2375706c9476dbf4d2ac01e40b75fb564e90bf54f
 ```
 
-The rebuilt cache has been validated structurally and through a complete BSCD
-decompression pass. It has not been automatically installed into or runtime-
-tested by the game; keep the Steam-generated cache available when testing it.
+## Compare caches
+
+Compare Microsoft disassembly and normalized runtime ABI independently:
+
+```powershell
+uv run sm-shaders compare original-shaders.sbc rebuilt-shaders.sbc `
+  --report comparison.json --diff-dir assembly-diffs
+```
+
+The untouched acceptance build matches all 4,141 original disassemblies,
+executable streams, opcode sequences, ABIs, and metadata tables. It has not been
+automatically installed into or runtime-tested by the game; keep the
+Steam-generated cache available when testing it.
 
 ## Extract lower-level artifacts
 

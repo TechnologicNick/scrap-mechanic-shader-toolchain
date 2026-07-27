@@ -149,9 +149,16 @@ making repeated runs byte-for-byte reproducible.
 ## Cache serialization
 
 The reverse path uses the retained manifest as the authoritative table layout.
-It compiles every selector branch with Microsoft's `D3DCompile`, supplies the
-stage-appropriate Shader Model 5 profile, and orders the resulting bytecode by
-the original shader index. `D3DCompressShaders` creates a new BSCD bundle.
+Corpus format version 2 records a token fingerprint for every HLSL branch and
+the hash of its exact original DXBC. Comments and whitespace are excluded from
+the token fingerprint.
+
+An unchanged branch uses the verified exact DXBC. A meaningfully edited branch
+is compiled with Microsoft's `D3DCompile` and its stage-appropriate Shader Model
+5 profile. `D3DReflect` then compares its normalized runtime ABI with the
+baseline: signatures, resources, constant-buffer layouts, and compute
+thread-group dimensions must remain compatible. `D3DCompressShaders` creates a
+new BSCD bundle in original shader-index order.
 
 The serializer retains all original shader and job keys, job mappings, resource
 IDs, stages, resource references, and descriptors. It replaces the BSCD bundle
@@ -166,8 +173,12 @@ Before the temporary output is renamed, the tool parses it again and uses
 uv run sm-shaders build --jobs 32 output rebuilt-shaders.sbc
 ```
 
-Because optimized DXBC cannot always be expressed as recompilable HLSL by the
-available decompilers, reconstruction also retains each exact DXBC blob. Normal
-build mode uses it only when `D3DCompile` rejects that branch; `--strict`
-disables this behavior. This hybrid is necessary for a complete cache until the
-remaining lift defects are repaired.
+After BSCD compression, every unchanged shader is disassembled again and must
+match its original Microsoft disassembly. `sm-shaders compare` provides the
+same check independently and also reports executable-stream, opcode-sequence,
+ABI, and metadata equality.
+
+Decompiler research remains available through `--recompile-all`; its optional
+`--allow-dxbc-fallback` mode is deliberately separate from the safe default.
+Edited branches never silently fall back. `--allow-interface-changes` is an
+explicit unsafe override for coordinated engine-side changes.
