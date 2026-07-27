@@ -60,7 +60,9 @@ def test_select_shader_pair_selects_pixel_permutation() -> None:
     assert pixel["selector"] == "SM_SHADER_SECOND_PIXEL"
 
 
-@pytest.mark.parametrize("harness", ["fullscreen_uv", "fullscreen_gui"])
+@pytest.mark.parametrize(
+    "harness", ["fullscreen_uv", "fullscreen_gui", "fullscreen_debug"]
+)
 def test_select_shader_pair_allows_synthesized_fullscreen_vertex(harness: str) -> None:
     manifest = manifest_with_fxaa()
     manifest["shaders"] = [manifest["shaders"][1]]

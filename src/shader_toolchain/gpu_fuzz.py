@@ -74,9 +74,42 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_DEBUG_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float4 viewPosition : VIEW_POSITION0;
+    float3 screenUv : SCREEN_UV0;
+    nointerpolation float4 color : TEXCOORD0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.viewPosition = float4(positions[vertexId], -12.0, 1.0);
+    output.screenUv = float3(coordinates[vertexId], 0.5);
+    output.color = float4(0.25, 0.5, 0.75, 0.625);
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
+    "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
 }
 
 
