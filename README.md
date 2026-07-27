@@ -62,6 +62,10 @@ output/
 |   |-- bloom_downres.hlsl
 |   |-- ... exactly 80 module files ...
 |   `-- upres_clouds.hlsl
+|-- semantic/
+|   |-- include/
+|   |   `-- post_fxaa_abi.hlsl
+|   `-- post_fxaa.hlsl
 `-- manifest.json
 ```
 
@@ -93,6 +97,29 @@ Generated `SM_DEFINE` and `SM_SELECT` blocks are structural metadata; edit the
 HLSL around them rather than those blocks. Verification checks that their actual
 preprocessor behavior still agrees with the manifest.
 
+### Readable semantic lifts
+
+The `hlsl/` modules remain the mechanical, lossless reverse-engineering layer.
+Recognized shaders additionally receive a hand-readable implementation under
+`semantic/`. This separates proven cache recovery from higher-level inference:
+the raw lift remains available for instruction-level investigation, while the
+semantic version uses meaningful types, variable names, constants, and control
+flow.
+
+The first recipe recognizes both stages of `post_fxaa`. Its pixel shader is
+expressed as the compact FXAA algorithm: a five-sample luminance neighborhood,
+edge direction and span reduction, inner/outer filtering, and a luminance-range
+choice. Its vertex shader names the full-screen triangle and the center and
+north-west sample coordinates. The recovered `CB_PROJECTION` layout is kept in
+a shared include.
+
+Semantic recipes are not accepted merely because they compile. Reconstruction
+compiles each generated implementation and reflects it against the recovered
+DXBC. Signatures, texture and sampler slots, constant-buffer layout, and shader
+stage must remain compatible. The manifest records its source path, token
+fingerprint, recipe name, ABI result, and whether its assembly happens to be
+exact.
+
 ## Verify an output
 
 ```powershell
@@ -104,7 +131,7 @@ agree, and that every one of the 4,141 shader selector branches is present. It
 also prints a SHA-256 digest over every relative path and byte in the corpus.
 
 For the cache with SHA-256
-`d29a016093ec82099f34ebbff852d102d737c8efc0e28eec08bdfea1e205651f`, two
+`d29a016093ec82099f34ebbff852d102d737c8efc0e28eec08bdfea1e205651f`,
 the current v2 corpus has this output digest:
 
 ```text
@@ -133,6 +160,14 @@ Shader Model 5 profile. Edited shaders must preserve their reflected runtime ABI
 signatures, resource bindings, constant-buffer layouts, and compute thread-group
 dimensions. Compilation errors and ABI changes are fatal and never silently
 fall back to the old shader.
+
+For shaders with a semantic recipe, edit the file under `semantic/` to work at
+the readable level. An unchanged semantic file still uses the exact retained
+DXBC; it is not recompiled just because a readable version exists. A semantic
+edit compiles only affected selectors and receives the same ABI and assembly
+diff checks as a raw edit. If both the raw and semantic representations of one
+selector are changed, the build stops and asks you to keep one representation
+authoritative. `--recompile-all` prefers semantic HLSL where it is available.
 
 The adjacent `rebuilt-shaders.sbc.build.json` classifies every selector. Edited
 branches also receive deterministic Microsoft assembly diffs under

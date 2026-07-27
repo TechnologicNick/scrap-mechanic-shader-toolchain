@@ -169,6 +169,27 @@ cannot be changed silently.
 On the validated cache, the flat modules total 102,490,876 bytes and the factored
 modules total 51,197,843 bytes, reducing HLSL storage by approximately 50%.
 
+### Semantic recipe layer
+
+Factoring removes textual duplication but does not recover names or structured
+intent. Recognized programs therefore receive an optional second representation
+under `semantic/`. This is deliberately additive: `hlsl/` remains the mechanical
+lift used as evidence, and the exact `dxbc/` sidecar remains the executable
+baseline.
+
+A recipe emits readable HLSL, expands its selector and local includes, compiles
+it with the recovered entry point and stage profile, and reflects the candidate.
+The candidate is retained only when its signatures, resources, constant buffers,
+and thread-group dimensions are ABI-compatible with the baseline. Its manifest
+record contains `semantic_recipe`, `semantic_hlsl_path`,
+`semantic_hlsl_token_sha256`, `semantic_abi_compatible`, and
+`semantic_assembly_exact`.
+
+The `post_fxaa` recipe currently covers its vertex and pixel variants. It maps
+the decompiled arithmetic to named FXAA neighborhoods, luminance calculations,
+edge direction, span reduction, and inner/outer filters, while preserving the
+recovered bindings and `CB_PROJECTION` layout.
+
 ## Cache serialization
 
 The reverse path uses the retained manifest as the authoritative table layout.
@@ -182,6 +203,11 @@ is compiled with Microsoft's `D3DCompile` and its stage-appropriate Shader Model
 baseline: signatures, resources, constant-buffer layouts, and compute
 thread-group dimensions must remain compatible. `D3DCompressShaders` creates a
 new BSCD bundle in original shader-index order.
+
+When a semantic representation exists, its independent token fingerprint is
+checked as well. An edit to that representation takes precedence over unchanged
+raw HLSL. Simultaneous edits to both representations are rejected as ambiguous.
+A forced research rebuild prefers semantic HLSL for covered variants.
 
 The serializer retains all original shader and job keys, job mappings, resource
 IDs, stages, resource references, and descriptors. It replaces the BSCD bundle
