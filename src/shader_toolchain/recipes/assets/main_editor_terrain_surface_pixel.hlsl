@@ -5,23 +5,22 @@ SamplerState LinearClamp : register(s6);
 Texture2DArray<float4> diffuseLayers : register(t0);
 Texture2DArray<float4> asgLayers : register(t1);
 Texture2DArray<float4> normalLayers : register(t2);
-Texture2DArray<float4> materialWeightsA : register(t3);
-Texture2DArray<float4> materialWeightsB : register(t4);
+Texture2D<float4> materialWeightsA : register(t3);
+Texture2D<float4> materialWeightsB : register(t4);
 
 #include "include/terrain_surface_common.hlsl"
 
 LayerSample SampleLayer(float2 worldUv, uint layer)
 {
     LayerSample sample;
-    sample.diffuse = diffuseLayers.SampleBias(
-        LinearWrap, float3(worldUv, float(layer)), cb_fMipBias).rgb;
-    sample.asg = asgLayers.SampleBias(
-        LinearWrap, float3(worldUv, float(layer)), cb_fMipBias).yzw;
-    sample.normal = normalLayers.SampleBias(
-        LinearWrap, float3(worldUv, float(layer)), cb_fMipBias).rg;
+    sample.diffuse = diffuseLayers.Sample(
+        LinearWrap, float3(worldUv, float(layer))).rgb;
+    sample.asg = asgLayers.Sample(
+        LinearWrap, float3(worldUv, float(layer))).yzw;
+    sample.normal = normalLayers.Sample(
+        LinearWrap, float3(worldUv, float(layer))).rg;
     return sample;
 }
-
 
 struct TerrainGBuffer
 {
@@ -32,18 +31,15 @@ struct TerrainGBuffer
 
 TerrainGBuffer mainPS(
     float4 position : SV_Position0,
-    float2 materialUv : UV0,
-    float2 worldUv : WORLD_UV0,
-    float3 vertexColor : COLOR0,
-    nointerpolation uint tileIndex : TILE_INDEX0,
-    float4 tangentInput : TEXCOORD5,
-    float4 bitangentInput : TEXCOORD6,
-    float3 normalInput : TEXCOORD7)
+    float2 materialUv : TEXCOORD1,
+    float2 worldUv : TEXCOORD3,
+    float4 vertexColor : TEXCOORD2,
+    float4 tangentInput : TEXCOORD4,
+    float4 bitangentInput : TEXCOORD5,
+    float3 normalInput : TEXCOORD6)
 {
-    float4 packedA = materialWeightsA.Sample(
-        LinearClamp, float3(materialUv, float(tileIndex))).zxwy;
-    float4 packedB = materialWeightsB.Sample(
-        LinearClamp, float3(materialUv, float(tileIndex))).zxwy;
+    float4 packedA = materialWeightsA.Sample(LinearClamp, materialUv).zxwy;
+    float4 packedB = materialWeightsB.Sample(LinearClamp, materialUv).zxwy;
     float weightsByLayer[8] = {
         packedA.y, packedA.w, packedA.x, packedA.z,
         packedB.y, packedB.w, packedB.x, packedB.z,
@@ -56,8 +52,8 @@ TerrainGBuffer mainPS(
     TakeStrongest(weightsByLayer, strongestWeights.z, strongestLayers.z);
     SortByLayer(strongestWeights, strongestLayers);
 
-    float4 baseDiffuseTexture = diffuseLayers.SampleBias(
-        LinearWrap, float3(worldUv, 8.0), cb_fMipBias);
+    float4 baseDiffuseTexture = diffuseLayers.Sample(
+        LinearWrap, float3(worldUv, 8.0));
     LayerSample baseLayer = SampleLayer(worldUv, 8u);
     float coverage = min(1.0, 2.0 * baseDiffuseTexture.a);
     float3 diffuse = coverage * baseLayer.diffuse;
@@ -69,8 +65,8 @@ TerrainGBuffer mainPS(
         if (strongestWeights[index] > 0.0)
         {
             uint layer = strongestLayers[index];
-            float4 layerDiffuse = diffuseLayers.SampleBias(
-                LinearWrap, float3(worldUv, float(layer)), cb_fMipBias);
+            float4 layerDiffuse = diffuseLayers.Sample(
+                LinearWrap, float3(worldUv, float(layer)));
             LayerSample sample = SampleLayer(worldUv, layer);
             float blend = min(
                 1.0, 2.0 * strongestWeights[index] * layerDiffuse.a);
@@ -90,7 +86,8 @@ TerrainGBuffer mainPS(
     float3 viewNormal = normalize(mad(tangent, tangentZ, mappedNormal));
 
     TerrainGBuffer output;
-    output.albedo = float4(1.29999995 * vertexColor * diffuse, asg.y);
+    output.albedo = float4(
+        1.29999995 * vertexColor.rgb * diffuse, asg.y);
     output.encodedNormal = EncodeViewNormal(viewNormal);
     output.material = float4(asg.z, asg.x, 0.0, 0.0);
     return output;

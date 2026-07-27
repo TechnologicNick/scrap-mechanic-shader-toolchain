@@ -1,4 +1,4 @@
-"""Recognize and emit layered terrain-surface shaders."""
+"""Recognize and emit editor terrain-surface shaders."""
 
 from __future__ import annotations
 
@@ -14,34 +14,47 @@ from .common import (
 )
 
 
-def apply_main_terrain_surface_recipe(
+def apply_main_editor_terrain_surface_recipe(
     staging: Path,
     records: list[dict[str, Any]],
     blobs: list[bytes],
     compiler: Any,
 ) -> dict[str, Any] | None:
-    shaders = [record for record in records if record["source_name"] == "main_terrain_surface"]
-    if len(shaders) != 3 or sum(shader["stage"] == "pixel" for shader in shaders) != 1:
+    shaders = [
+        record
+        for record in records
+        if record["source_name"] == "main_editor_terrain_surface"
+    ]
+    if len(shaders) != 3 or sum(
+        shader["stage"] == "pixel" for shader in shaders
+    ) != 1:
         return None
     ensure_projection_include(staging)
     ensure_asset_include(staging, "terrain_surface_common.hlsl")
     ensure_recovered_cbuffer_include(
-        staging, "main_terrain_surface", "CB_TILE_INFO", "terrain_tile_info_abi.hlsl"
+        staging,
+        "main_editor_terrain_surface",
+        "CB_SURFACE_INFO",
+        "editor_surface_info_abi.hlsl",
     )
     bodies = {}
     executions = {}
     for shader in shaders:
-        prefix = "".join(f"#define {definition} 1\n" for definition in shader["defines"])
+        prefix = "".join(
+            f"#define {definition} 1\n" for definition in shader["defines"]
+        )
         bodies[shader["selector"]] = prefix + asset(
-            "main_terrain_surface_pixel.hlsl" if shader["stage"] == "pixel" else "main_terrain_surface_vertex.hlsl"
+            "main_editor_terrain_surface_pixel.hlsl"
+            if shader["stage"] == "pixel"
+            else "main_editor_terrain_surface_vertex.hlsl"
         )
         if shader["stage"] == "pixel":
             executions[shader["selector"]] = {
-                "kind": "fullscreen_terrain",
-                "vertex_harness": "fullscreen_terrain",
+                "kind": "fullscreen_editor_terrain",
+                "vertex_harness": "fullscreen_editor_terrain",
                 "texture_slots": [0, 1, 2, 3, 4],
-                "texture_kinds": ["2darray"] * 5,
-                "texture_slices": [9] * 5,
+                "texture_kinds": ["2darray", "2darray", "2darray", "2d", "2d"],
+                "texture_slices": [9, 9, 9, 1, 1],
                 "samplers": [
                     {"slot": 3, "filter": "linear"},
                     {"slot": 6, "filter": "linear"},
@@ -56,7 +69,7 @@ def apply_main_terrain_surface_recipe(
         shaders,
         blobs,
         compiler,
-        recipe_name="main_terrain_surface",
+        recipe_name="main_editor_terrain_surface",
         bodies=bodies,
         executions=executions,
     )

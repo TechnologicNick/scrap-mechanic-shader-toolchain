@@ -40,6 +40,7 @@ from .main_clutter_impostor import apply_main_clutter_impostor_recipe
 from .main_billboard import apply_main_billboard_recipe
 from .main_text import apply_main_text_recipe
 from .main_terrain_surface import apply_main_terrain_surface_recipe
+from .main_editor_terrain_surface import apply_main_editor_terrain_surface_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
@@ -92,6 +93,7 @@ RECIPES = (
     apply_main_billboard_recipe,
     apply_main_text_recipe,
     apply_main_terrain_surface_recipe,
+    apply_main_editor_terrain_surface_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
     apply_cmp_fft_butterfly_shared_recipe,
     apply_cube_map_blend_recipe,

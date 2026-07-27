@@ -216,6 +216,44 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_EDITOR_TERRAIN_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float2 materialUv : TEXCOORD1;
+    float2 worldUv : TEXCOORD3;
+    float4 color : TEXCOORD2;
+    float4 tangent : TEXCOORD4;
+    float4 bitangent : TEXCOORD5;
+    float3 normal : TEXCOORD6;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.materialUv = coordinates[vertexId];
+    output.worldUv = coordinates[vertexId] * 0.25;
+    output.color = float4(0.25, 0.5, 0.75, 1.0);
+    output.tangent = float4(1.0, 0.0, 0.0, 0.0);
+    output.bitangent = float4(0.0, 1.0, 0.0, 0.0);
+    output.normal = float3(0.0, 0.0, 1.0);
+    return output;
+}
+"""
+
 FULLSCREEN_TERRAIN_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -264,6 +302,7 @@ VERTEX_HARNESSES = {
     "fullscreen_text": FULLSCREEN_TEXT_VERTEX,
     "fullscreen_billboard": FULLSCREEN_BILLBOARD_VERTEX,
     "fullscreen_terrain": FULLSCREEN_TERRAIN_VERTEX,
+    "fullscreen_editor_terrain": FULLSCREEN_EDITOR_TERRAIN_VERTEX,
 }
 
 

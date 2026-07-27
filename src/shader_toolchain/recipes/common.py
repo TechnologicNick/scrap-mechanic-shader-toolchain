@@ -40,6 +40,15 @@ def ensure_hdr_include(staging: Path) -> None:
         path.write_text(asset("hdr_abi.hlsl"), encoding="utf-8", newline="\n")
 
 
+def ensure_asset_include(staging: Path, filename: str) -> None:
+    """Copy a shared semantic helper into the generated include directory."""
+    include_dir = staging / "semantic" / "include"
+    include_dir.mkdir(parents=True, exist_ok=True)
+    path = include_dir / filename
+    if not path.exists():
+        path.write_text(asset(filename), encoding="utf-8", newline="\n")
+
+
 def ensure_recovered_cbuffer_include(
     staging: Path,
     source_name: str,
