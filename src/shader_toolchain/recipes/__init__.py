@@ -36,6 +36,7 @@ from .gui import apply_gui_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
 from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
+from .indirect_temporal import apply_indirect_temporal_recipe
 from .main_debug_drawer import apply_main_debug_drawer_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
 from .main_billboard import apply_main_billboard_recipe
@@ -80,6 +81,7 @@ RECIPES = (
     apply_copy_to_shadow_atlas_recipe,
     apply_gui_texture_3d_recipe,
     apply_gui_texture_box_array_recipe,
+    apply_indirect_temporal_recipe,
     apply_blur_pushmap_a_recipe,
     apply_blur_pushmap_b_recipe,
     apply_cube_map_face_present_recipe,
