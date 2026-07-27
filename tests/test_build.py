@@ -1,13 +1,17 @@
 import json
 
+import pytest
+
 from shader_toolchain.build import (
     meaningfully_edited,
+    select_shader_source,
     serialize_cache,
     serialize_payload,
     stable_diagnostic,
 )
 from shader_toolchain.hlsl import hlsl_token_sha256, module_variants
 from shader_toolchain.sbc import parse_cache, parse_payload
+from shader_toolchain.reconstruct import ToolchainError
 
 
 def test_module_variants_extracts_generated_branches() -> None:
@@ -66,3 +70,36 @@ def test_meaningful_edit_ignores_formatting_but_detects_code_change() -> None:
     }
     assert not meaningfully_edited(shader, "/* comment */ return   1 ;")
     assert meaningfully_edited(shader, "return 2;")
+
+
+def semantic_shader() -> dict[str, str]:
+    return {
+        "selector": "SM_SHADER_A",
+        "hlsl_token_sha256": hlsl_token_sha256("raw();"),
+        "semantic_hlsl_token_sha256": hlsl_token_sha256("readable();"),
+    }
+
+
+def test_semantic_edit_takes_precedence_over_unchanged_raw_hlsl() -> None:
+    assert select_shader_source(
+        semantic_shader(), "raw();", "changed_readable();", recompile_all=False
+    ) == ("changed_readable();", "semantic", "edited-semantic")
+
+
+def test_unchanged_semantic_shader_preserves_exact_bytecode() -> None:
+    assert select_shader_source(
+        semantic_shader(), "raw();", "readable();", recompile_all=False
+    ) == (None, "exact", "unchanged-exact")
+
+
+def test_research_build_prefers_semantic_hlsl() -> None:
+    assert select_shader_source(
+        semantic_shader(), "raw();", "readable();", recompile_all=True
+    ) == ("readable();", "semantic", "research-semantic")
+
+
+def test_conflicting_raw_and_semantic_edits_are_rejected() -> None:
+    with pytest.raises(ToolchainError, match="both raw and semantic HLSL"):
+        select_shader_source(
+            semantic_shader(), "changed_raw();", "changed_readable();", recompile_all=False
+        )

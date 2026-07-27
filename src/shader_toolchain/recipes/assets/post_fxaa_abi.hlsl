@@ -1,0 +1,45 @@
+// Exact post_fxaa buffer layout recovered from DXBC reflection.
+cbuffer CB_PROJECTION : register(b5)
+{
+    float4x4 cb_xViewToProjection : packoffset(c0);
+    float4x4 projectionToView : packoffset(c4);
+    float4x4 worldToView : packoffset(c8);
+    float4x4 viewToWorld : packoffset(c12);
+    float4x4 worldToViewProjection : packoffset(c16);
+    float4x4 viewToReflection : packoffset(c20);
+    float4x4 cb_xWorldToReflection : packoffset(c24);
+    float4x4 cb_xPrevViewToProjection : packoffset(c28);
+    float4x4 cb_xPrevProjectionToView : packoffset(c32);
+    float4x4 cb_xPrevWorldToView : packoffset(c36);
+    float4x4 cb_xPrevViewToWorld : packoffset(c40);
+    float4x4 cb_xPrevWorldToViewProjection : packoffset(c44);
+    float2 cb_vPrevViewCorner : packoffset(c48);
+    float2 cb_vPrevViewTranslate : packoffset(c48.z);
+    float4 cb_vNearFarViewCorner : packoffset(c49);
+    float2 cb_vViewTranslate : packoffset(c50);
+    float2 cb_vInverseCameraRange : packoffset(c50.z);
+    uint2 cb_vuViewportSize : packoffset(c51);
+    float2 cb_vContainerPixelSize : packoffset(c51.z);
+    float2 cb_vPixelSizeMipUp : packoffset(c52);
+    float2 cb_vPixelSizeMipDown : packoffset(c52.z);
+    float2 cb_vRenderScale : packoffset(c53);
+    float2 cb_vInvRenderScale : packoffset(c53.z);
+    float2 cb_vUvLimit : packoffset(c54);
+    float2 cb_vUvLimitMipUp : packoffset(c54.z);
+    float2 cb_vUvLimitMipDown : packoffset(c55);
+    float2 cb_vPrevUvLimit : packoffset(c55.z);
+    float2 cb_vPrevRenderScale : packoffset(c56);
+    float2 cb_vPrevInvRenderScale : packoffset(c56.z);
+    float2 cb_vTargetSize : packoffset(c57);
+    float2 cb_vPrevTargetSize : packoffset(c57.z);
+    uint2 cb_vuTargetSize : packoffset(c58);
+    uint2 cb_vuPrevTargetSize : packoffset(c58.z);
+    float cb_fProjectionScale : packoffset(c59);
+    float cb_fViewportAspect : packoffset(c59.y);
+    float cb_fMipBias : packoffset(c59.z);
+    float cb_f720To4K : packoffset(c59.w);
+    float2 cb_vDownScaleing : packoffset(c60);
+    float2 cb_vViewToScreenScale : packoffset(c60.z);
+    float cb_fRenderScaleStability : packoffset(c61);
+    float3 _projectionPadding : packoffset(c61.y);
+}

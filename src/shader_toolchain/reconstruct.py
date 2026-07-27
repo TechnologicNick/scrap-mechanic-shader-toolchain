@@ -12,7 +12,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .hlsl import hlsl_token_sha256, module_variants, render_factored_module
+from .hlsl import (
+    hlsl_token_sha256,
+    module_variants,
+    render_factored_module,
+    resolve_local_includes,
+)
 from .sbc import D3DCompiler, parse_cache, parse_payload, safe_stem
 
 
@@ -81,6 +86,36 @@ def verify_output(
     if missing_selectors:
         errors.append(f"{len(missing_selectors)} shader selectors are missing")
 
+    semantic_root = (output / "semantic").resolve()
+    semantic_modules: dict[str, dict[str, str]] = {}
+    semantic_paths = {
+        shader["semantic_hlsl_path"]
+        for shader in shaders
+        if shader.get("semantic_hlsl_path")
+    }
+    for relative in sorted(semantic_paths):
+        path = (output / relative).resolve()
+        try:
+            path.relative_to(semantic_root)
+        except ValueError:
+            errors.append(f"semantic HLSL path escapes semantic directory: {relative}")
+            continue
+        if not path.is_file():
+            errors.append(f"semantic HLSL file is missing: {relative}")
+            continue
+        variants = module_variants(
+            path.read_text(encoding="utf-8", errors="strict"),
+            {
+                shader["selector"]: shader["defines"]
+                for shader in shaders
+                if shader.get("semantic_hlsl_path") == relative
+            },
+        )
+        semantic_modules[relative] = {
+            selector: resolve_local_includes(source, path, semantic_root)
+            for selector, source in variants.items()
+        }
+
     if verify_hlsl_fingerprints and manifest.get("corpus_format_version", 1) >= 2:
         expanded_modules = {
             source_name: module_variants(
@@ -105,6 +140,21 @@ def verify_output(
         if changed_variants:
             errors.append(
                 f"{len(changed_variants)} HLSL variants differ from manifest fingerprints"
+            )
+        changed_semantic_variants = []
+        for shader in shaders:
+            relative = shader.get("semantic_hlsl_path")
+            if not relative:
+                continue
+            expanded = semantic_modules.get(relative, {}).get(shader["selector"])
+            if expanded is None or hlsl_token_sha256(expanded) != shader.get(
+                "semantic_hlsl_token_sha256"
+            ):
+                changed_semantic_variants.append(shader["selector"])
+        if changed_semantic_variants:
+            errors.append(
+                f"{len(changed_semantic_variants)} semantic HLSL variants differ "
+                "from manifest fingerprints"
             )
 
     bad_dxbc = []
@@ -326,6 +376,12 @@ def reconstruct(
                 render_module(source_name, variants), encoding="utf-8", newline="\n"
             )
 
+        # Import lazily because semantic recipes use bytecode comparison, whose
+        # errors are expressed as this module's ToolchainError.
+        from .recipes import apply_recipes
+
+        semantic_recipes = apply_recipes(staging, records, blobs, compiler)
+
         factored_hlsl_bytes = sum(
             path.stat().st_size for path in hlsl_dir.glob("*.hlsl")
         )
@@ -343,6 +399,7 @@ def reconstruct(
             "expanded_hlsl_bytes": expanded_hlsl_bytes,
             "deduplicated_hlsl_bytes": expanded_hlsl_bytes
             - factored_hlsl_bytes,
+            "semantic_recipes": semantic_recipes,
             "backends": dict(
                 sorted(
                     (backend, sum(r["backend"] == backend for r in records))

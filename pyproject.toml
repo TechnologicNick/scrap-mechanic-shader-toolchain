@@ -17,5 +17,8 @@ sm-shaders = "shader_toolchain.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+shader_toolchain = ["recipes/assets/*.hlsl"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

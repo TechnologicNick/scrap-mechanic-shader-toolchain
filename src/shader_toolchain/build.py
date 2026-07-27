@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .compare import compare_bytecodes, normalized_assembly
-from .hlsl import hlsl_token_sha256, module_variants
+from .hlsl import hlsl_token_sha256, module_variants, resolve_local_includes
 from .reconstruct import ToolchainError, verify_output
 from .reflect import ShaderReflector
 from .sbc import D3DCompiler, lz4_compress_literals, parse_cache, parse_payload
@@ -41,6 +41,39 @@ def meaningfully_edited(shader: dict[str, Any], source: str) -> bool:
             f"{shader['selector']} has no HLSL fingerprint; rerun sm-shaders reconstruct"
         )
     return hlsl_token_sha256(source) != baseline
+
+
+def select_shader_source(
+    shader: dict[str, Any],
+    raw_source: str,
+    semantic_source: str | None,
+    *,
+    recompile_all: bool,
+) -> tuple[str | None, str, str]:
+    """Choose exact bytecode, raw HLSL, or readable semantic HLSL for a variant."""
+    raw_changed = meaningfully_edited(shader, raw_source)
+    semantic_changed = False
+    if semantic_source is not None:
+        baseline = shader.get("semantic_hlsl_token_sha256")
+        if not baseline:
+            raise ToolchainError(
+                f"{shader['selector']} has semantic HLSL but no semantic fingerprint"
+            )
+        semantic_changed = hlsl_token_sha256(semantic_source) != baseline
+    if raw_changed and semantic_changed:
+        raise ToolchainError(
+            f"{shader['selector']}: both raw and semantic HLSL were edited; "
+            "keep only one representation changed"
+        )
+    if recompile_all:
+        if semantic_source is not None:
+            return semantic_source, "semantic", "research-semantic"
+        return raw_source, "raw", "research-raw"
+    if semantic_changed:
+        return semantic_source, "semantic", "edited-semantic"
+    if raw_changed:
+        return raw_source, "raw", "edited-raw"
+    return None, "exact", "unchanged-exact"
 
 
 def serialize_payload(manifest: dict[str, Any], bundle: bytes) -> bytes:
@@ -129,6 +162,27 @@ def build_cache(
                 if shader["source_name"] == source_name
             },
         )
+    semantic_modules: dict[str, dict[str, str]] = {}
+    semantic_paths = {
+        shader["semantic_hlsl_path"]
+        for shader in shaders
+        if shader.get("semantic_hlsl_path")
+    }
+    semantic_root = corpus / "semantic"
+    for relative_path in semantic_paths:
+        path = corpus / relative_path
+        variants = module_variants(
+            path.read_text(encoding="utf-8"),
+            {
+                shader["selector"]: shader["defines"]
+                for shader in shaders
+                if shader.get("semantic_hlsl_path") == relative_path
+            },
+        )
+        semantic_modules[relative_path] = {
+            selector: resolve_local_includes(source, path, semantic_root)
+            for selector, source in variants.items()
+        }
 
     requested_workers = jobs if jobs is not None else (os.cpu_count() or 1)
     if requested_workers < 1:
@@ -136,29 +190,52 @@ def build_cache(
     thread_state = threading.local()
     bytecodes: list[bytes | None] = [None] * len(shaders)
     build_records: list[dict[str, Any] | None] = [None] * len(shaders)
-    compile_tasks: list[tuple[int, dict[str, Any], str, bytes, str]] = []
+    compile_tasks: list[tuple[int, dict[str, Any], str, bytes, str, str, str]] = []
 
     for index, shader in enumerate(shaders):
         selector = shader["selector"]
         try:
-            source = modules[shader["source_name"]][selector]
+            raw_source = modules[shader["source_name"]][selector]
         except KeyError as error:
             raise ToolchainError(f"missing HLSL branch {selector}") from error
-        current_fingerprint = hlsl_token_sha256(source)
+        semantic_source = None
+        semantic_path = shader.get("semantic_hlsl_path")
+        if semantic_path:
+            try:
+                semantic_source = semantic_modules[semantic_path][selector]
+            except KeyError as error:
+                raise ToolchainError(f"missing semantic HLSL branch {selector}") from error
+        source, representation, mode = select_shader_source(
+            shader,
+            raw_source,
+            semantic_source,
+            recompile_all=recompile_all,
+        )
         exact_path = corpus / shader["dxbc_path"]
         exact_bytecode = exact_path.read_bytes()
-        if not recompile_all and not meaningfully_edited(shader, source):
+        if source is None:
             bytecodes[index] = exact_bytecode
             build_records[index] = {
                 "selector": selector,
-                "mode": "unchanged-exact",
-                "hlsl_token_sha256": current_fingerprint,
+                "mode": mode,
+                "source_representation": representation,
+                "compiled": False,
+                "hlsl_token_sha256": hlsl_token_sha256(raw_source),
                 "assembly_exact": True,
                 "abi_compatible": True,
             }
         else:
+            current_fingerprint = hlsl_token_sha256(source)
             compile_tasks.append(
-                (index, shader, source, exact_bytecode, current_fingerprint)
+                (
+                    index,
+                    shader,
+                    source,
+                    exact_bytecode,
+                    current_fingerprint,
+                    representation,
+                    mode,
+                )
             )
 
     worker_count = min(requested_workers, len(compile_tasks)) if compile_tasks else 0
@@ -169,6 +246,8 @@ def build_cache(
         source: str,
         exact_bytecode: bytes,
         current_fingerprint: str,
+        representation: str,
+        mode: str,
     ) -> tuple[int, bytes, dict[str, Any], str | None]:
         profile = PROFILES.get(shader["stage"])
         if profile is None:
@@ -187,6 +266,9 @@ def build_cache(
             return index, exact_bytecode, {
                 "selector": selector,
                 "mode": "recompile-fallback",
+                "requested_mode": mode,
+                "source_representation": representation,
+                "compiled": False,
                 "hlsl_token_sha256": current_fingerprint,
                 "error": stable_diagnostic(str(error)),
                 "assembly_exact": True,
@@ -201,10 +283,11 @@ def build_cache(
             raise ToolchainError(
                 f"{selector}: edited shader changes runtime ABI sections: {changed}"
             )
-        mode = "research-compiled" if recompile_all else "edited-compiled"
         record = {
             "selector": selector,
             "mode": mode,
+            "source_representation": representation,
+            "compiled": True,
             "hlsl_token_sha256": current_fingerprint,
             **comparison,
         }
@@ -292,10 +375,7 @@ def build_cache(
     summary = {
         **header,
         "modes": mode_counts,
-        "compiled_count": sum(
-            record["mode"] in ("edited-compiled", "research-compiled")
-            for record in completed_records
-        ),
+        "compiled_count": sum(record["compiled"] for record in completed_records),
         "fallback_count": mode_counts.get("recompile-fallback", 0),
         "unchanged_exact_count": mode_counts.get("unchanged-exact", 0),
         "shader_count": len(shaders),

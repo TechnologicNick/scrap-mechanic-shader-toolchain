@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 
@@ -28,6 +29,7 @@ TOKEN = re.compile(
     r".",
     re.DOTALL,
 )
+LOCAL_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+)"\s*$', re.MULTILINE)
 
 
 class HlslFormatError(RuntimeError):
@@ -340,3 +342,21 @@ def hlsl_token_sha256(source: str) -> str:
         digest.update(len(encoded).to_bytes(4, "little"))
         digest.update(encoded)
     return digest.hexdigest()
+
+
+def resolve_local_includes(source: str, source_path: Path, root: Path) -> str:
+    """Inline quoted includes while preventing paths from escaping the corpus."""
+    root = root.resolve()
+
+    def replace(match: re.Match[str]) -> str:
+        include = (source_path.parent / match.group(1)).resolve()
+        try:
+            include.relative_to(root)
+        except ValueError as error:
+            raise HlslFormatError(f"include escapes semantic root: {match.group(1)}") from error
+        if not include.is_file():
+            raise HlslFormatError(f"semantic include does not exist: {match.group(1)}")
+        included = include.read_text(encoding="utf-8")
+        return resolve_local_includes(included, include, root).rstrip()
+
+    return LOCAL_INCLUDE.sub(replace, source)
