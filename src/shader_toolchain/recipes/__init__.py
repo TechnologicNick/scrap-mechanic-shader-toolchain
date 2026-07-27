@@ -51,6 +51,7 @@ from .main_clutter_impostor import apply_main_clutter_impostor_recipe
 from .main_clutter import apply_main_clutter_recipe
 from .main_billboard import apply_main_billboard_recipe
 from .main_block import apply_main_block_recipe
+from .main_asset import apply_main_asset_recipe
 from .main_character import apply_main_character_recipe
 from .main_particles import apply_main_particles_recipe
 from .main_voxel_terrain import apply_main_voxel_terrain_recipe
@@ -128,6 +129,7 @@ RECIPES = (
     apply_main_clutter_recipe,
     apply_main_billboard_recipe,
     apply_main_block_recipe,
+    apply_main_asset_recipe,
     apply_main_character_recipe,
     apply_main_particles_recipe,
     apply_main_voxel_terrain_recipe,

@@ -47,9 +47,12 @@ def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
         8: "index", 11: "index", 12: "index", 13: "random",
     }
     outputs = sorted(abi["outputs"], key=lambda output: output["index"])
+    depth = "PS_PERM_DEPTH" in defines
     execution = {
         "kind": "fullscreen_character",
         "vertex_harness": "fullscreen_character",
+        "width": 1,
+        "height": 1,
         "texture_slots": [resource["bind_point"] for resource in textures],
         "texture_kinds": [
             "2darray" if resource["dimension"] == 5 else "2d"
@@ -70,13 +73,14 @@ def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
             {"slot": buffer["bind_point"], "profile": profiles[buffer["bind_point"]]}
             for buffer in abi["constant_buffers"] if buffer["bind_point"] >= 0
         ],
-        "output": "color",
-        "output_components": 4,
-        "output_targets": len(outputs),
-        "output_target_components": [
-            max(1, output["mask"].bit_count()) for output in outputs
-        ],
+        "output": "depth" if depth else "color",
+        "output_components": 1 if depth else 4,
+        "output_targets": 1 if depth else len(outputs),
     }
+    if not depth:
+        execution["output_target_components"] = [
+            max(1, output["mask"].bit_count()) for output in outputs
+        ]
     if shader["selector"] in {
         "SM_SHADER_609AAD28B1D04C13",
         "SM_SHADER_67016D9BB633DAB4",
@@ -91,20 +95,35 @@ def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
     return execution
 
 
-def apply_main_character_recipe(
+def apply_character_material_recipe(
     staging: Path,
     records: list[dict[str, Any]],
     blobs: list[bytes],
     compiler: Any,
+    *,
+    source_name: str,
+    shader_count: int,
+    pixel_count: int,
 ) -> dict[str, Any] | None:
     shaders = [
-        record for record in records if record["source_name"] == "main_character"
+        record for record in records if record["source_name"] == source_name
     ]
-    if len(shaders) != 177 or sum(s["stage"] == "pixel" for s in shaders) != 138:
+    if (
+        len(shaders) != shader_count
+        or sum(s["stage"] == "pixel" for s in shaders) != pixel_count
+    ):
         return None
     definitions = {shader["selector"]: shader["defines"] for shader in shaders}
+    reflector = ShaderReflector()
+    output_masks = {
+        shader["selector"]: {
+            (output["semantic"], output["index"]): output["mask"]
+            for output in reflector.abi(blobs[shader["bundle_index"]])["outputs"]
+        }
+        for shader in shaders if shader["stage"] == "vertex"
+    }
     expanded = module_variants(
-        (staging / "hlsl" / "main_character.hlsl").read_text(encoding="utf-8"),
+        (staging / "hlsl" / f"{source_name}.hlsl").read_text(encoding="utf-8"),
         definitions,
     )
     for selector, source in expanded.items():
@@ -152,6 +171,31 @@ def apply_main_character_recipe(
             lane = "w" if semantic == "OCCLUSION" else "z"
             source = source.replace(f"v{register}.{lane}", f"w{register}")
             source = re.sub(rf"\bw{register}\.[xyzw]+", f"w{register}", source)
+        # This pose variant's scalar dither and noise pair occupied separate
+        # recovered output registers. Distinct interpolation classes preserve
+        # those masks; vertex-stage modifiers do not affect interpolation at
+        # runtime (the consuming pixel shader declares that behavior).
+        if re.search(r"out float o\d+ : DITHER0", source) and re.search(
+            r"out float2 o\d+ : NOISE_UV0", source
+        ):
+            source = re.sub(
+                r"out float (o\d+) : DITHER0",
+                r"out nointerpolation float \1 : DITHER0", source,
+            )
+            source = re.sub(
+                r"out float2 (o\d+) : NOISE_UV0",
+                r"out centroid float2 \1 : NOISE_UV0", source,
+            )
+        if output_masks.get(selector, {}).get(("CUTOFF", 0)) == 1:
+            source = re.sub(
+                r"out float ([op]\d+) : CUTOFF0",
+                r"out noperspective float \1 : CUTOFF0", source,
+            )
+        elif output_masks.get(selector, {}).get(("CUTOFF", 0)) == 2:
+            source = re.sub(
+                r"out float ([op]\d+) : CUTOFF0",
+                r"out nointerpolation float \1 : CUTOFF0", source,
+            )
         expanded[selector] = source
     bodies = {
         shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
@@ -163,5 +207,17 @@ def apply_main_character_recipe(
     }
     return emit_validated_module(
         staging, shaders, blobs, compiler,
-        recipe_name="main_character", bodies=bodies, executions=executions,
+        recipe_name=source_name, bodies=bodies, executions=executions,
+    )
+
+
+def apply_main_character_recipe(
+    staging: Path,
+    records: list[dict[str, Any]],
+    blobs: list[bytes],
+    compiler: Any,
+) -> dict[str, Any] | None:
+    return apply_character_material_recipe(
+        staging, records, blobs, compiler,
+        source_name="main_character", shader_count=177, pixel_count=138,
     )
