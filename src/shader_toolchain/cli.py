@@ -10,6 +10,7 @@ from pathlib import Path
 from .build import build_cache
 from .compare import compare_caches
 from .gpu_fuzz import fuzz_semantic_shader
+from .materialize import materialize_semantic_variant, semantic_records
 from .reconstruct import ToolchainError, reconstruct, verify_output
 from .sbc import FormatError
 
@@ -28,6 +29,24 @@ def build_parser() -> argparse.ArgumentParser:
         "verify", help="validate and hash a reconstructed HLSL corpus"
     )
     verify_parser.add_argument("output", type=Path)
+    materialize_parser = commands.add_parser(
+        "materialize",
+        help="write one semantic permutation without generated selector dispatch",
+    )
+    materialize_parser.add_argument("corpus", type=Path)
+    materialize_parser.add_argument("module")
+    materialize_parser.add_argument("output", type=Path, nargs="?")
+    materialize_parser.add_argument("--selector")
+    materialize_parser.add_argument(
+        "--define",
+        dest="defines",
+        action="append",
+        default=[],
+        help="require an exact recovered definition (repeatable)",
+    )
+    materialize_parser.add_argument(
+        "--list", action="store_true", help="list selectors instead of writing HLSL"
+    )
     build_parser = commands.add_parser(
         "build", help="compile an HLSL corpus back into shaders.sbc"
     )
@@ -109,6 +128,30 @@ def main() -> int:
             return 0
         if args.command == "verify":
             print(json.dumps(verify_output(args.output), indent=2, sort_keys=True))
+            return 0
+        if args.command == "materialize":
+            if args.list:
+                records = semantic_records(args.corpus, args.module)
+                print(json.dumps([
+                    {
+                        "selector": record["selector"],
+                        "stage": record["stage"],
+                        "entry_point": record["entry_point"],
+                        "defines": record["defines"],
+                    }
+                    for record in records
+                ], indent=2, sort_keys=True))
+                return 0
+            if args.output is None:
+                raise ToolchainError("materialize needs OUTPUT unless --list is used")
+            result = materialize_semantic_variant(
+                args.corpus,
+                args.module,
+                args.output,
+                selector=args.selector,
+                required_defines=args.defines,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
             return 0
         if args.command == "build":
             summary = build_cache(
