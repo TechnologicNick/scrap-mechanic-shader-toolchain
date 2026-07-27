@@ -40,6 +40,47 @@ def ensure_hdr_include(staging: Path) -> None:
         path.write_text(asset("hdr_abi.hlsl"), encoding="utf-8", newline="\n")
 
 
+def ensure_recovered_cbuffer_include(
+    staging: Path,
+    source_name: str,
+    cbuffer_name: str,
+    filename: str,
+) -> None:
+    """Reuse an exact reflected cbuffer declaration from the mechanical lift."""
+    include_dir = staging / "semantic" / "include"
+    include_dir.mkdir(parents=True, exist_ok=True)
+    path = include_dir / filename
+    if path.exists():
+        return
+    module = (staging / "hlsl" / f"{source_name}.hlsl").read_text(
+        encoding="utf-8"
+    )
+    marker = f"cbuffer {cbuffer_name}"
+    start = module.find(marker)
+    if start < 0:
+        raise RuntimeError(f"{source_name} does not declare {cbuffer_name}")
+    opening = module.find("{", start)
+    depth = 0
+    end = None
+    for index in range(opening, len(module)):
+        if module[index] == "{":
+            depth += 1
+        elif module[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise RuntimeError(f"unterminated {cbuffer_name} declaration")
+    path.write_text(
+        "// Exact declaration recovered from DXBC reflection.\n"
+        + module[start:end]
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
 def emit_validated_module(
     staging: Path,
     shaders: list[dict[str, Any]],

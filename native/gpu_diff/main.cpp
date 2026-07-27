@@ -197,7 +197,8 @@ const char* texture_kind_name(TextureKind kind) {
 
 uint32_t texture_slices(TextureKind kind) {
     if (kind == TextureKind::cube) return 6;
-    if (kind == TextureKind::two_d_array || kind == TextureKind::three_d) return 4;
+    if (kind == TextureKind::two_d_array) return 6;
+    if (kind == TextureKind::three_d) return 4;
     return 1;
 }
 
