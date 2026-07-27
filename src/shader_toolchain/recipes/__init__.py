@@ -51,6 +51,7 @@ from .main_line import apply_main_line_recipe
 from .main_impostor import apply_main_impostor_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_composition import apply_post_composition_recipe
+from .post_clouds import apply_post_clouds_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
 from .post_depth_to_pushmap import apply_post_depth_to_pushmap_recipe
@@ -71,6 +72,7 @@ RECIPES = (
     apply_post_godrays_recipe,
     apply_post_blur_recipe,
     apply_post_composition_recipe,
+    apply_post_clouds_recipe,
     apply_copy_downscale_recipe,
     apply_copy_depth_recipe,
     apply_copy_rgba_recipe,

@@ -788,7 +788,8 @@ def fuzz_semantic_shader(
     if any(
         binding["profile"] not in (
             "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
-            "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr"
+            "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr",
+            "cloud"
         )
         for binding in constant_buffers
     ):

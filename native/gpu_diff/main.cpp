@@ -36,6 +36,7 @@ enum class ConstantProfile {
     fsr_rcas,
     index,
     auto_hdr,
+    cloud,
 };
 
 struct ConstantBinding {
@@ -213,6 +214,7 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "fsr-rcas") return ConstantProfile::fsr_rcas;
     if (profile == "index") return ConstantProfile::index;
     if (profile == "auto-hdr") return ConstantProfile::auto_hdr;
+    if (profile == "cloud") return ConstantProfile::cloud;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
 }
@@ -241,6 +243,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::fsr_rcas: return "fsr-rcas";
     case ConstantProfile::index: return "index";
     case ConstantProfile::auto_hdr: return "auto-hdr";
+    case ConstantProfile::cloud: return "cloud";
     }
     return "unknown";
 }
@@ -890,6 +893,49 @@ public:
                 record[21] = 0.05f + random.unit() * 4.0f;
                 record[22] = random.unit() * 20.0f;
                 record[23] = 0.001f + random.unit() * 2.0f;
+            }
+        } else if (profile == ConstantProfile::cloud) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            for (float& value : constants) {
+                value = 0.05f + random.unit() * 0.9f;
+            }
+            constants[1 * 4 + 0] = 0.0f;
+            constants[1 * 4 + 1] = 0.0f;
+            constants[1 * 4 + 2] = 1.0f;
+            constants[3 * 4 + 0] = 1.0f;
+            constants[3 * 4 + 1] = 0.95f;
+            constants[3 * 4 + 2] = 0.9f;
+            constants[3 * 4 + 3] = 1.0f;
+            constants[7 * 4 + 0] = 0.016f;
+            constants[7 * 4 + 1] = random.unit();
+            constants[7 * 4 + 3] = 0.016f;
+            constants[8 * 4 + 3] = random.unit();
+            constants[11 * 4 + 3] = -10000.0f;
+
+            float* cloud = constants.data() + 78 * 4;
+            cloud[3] = 35000000.0f;
+            cloud[7] = 0.25f + random.unit() * 0.45f;
+            cloud[11] = 6000.0f;
+            cloud[12] = 0.0f;
+            cloud[13] = 0.0f;
+            cloud[14] = 1.0f;
+            cloud[15] = 100.0f + random.unit() * 300.0f;
+            cloud[19] = 36000000.0f;
+            cloud[23] = 5000.0f;
+            cloud[24] = random.unit();
+            const uint32_t max_depth_x = options_.width - 1;
+            const uint32_t max_depth_y = options_.height - 1;
+            std::memcpy(&cloud[28], &max_depth_x, sizeof(max_depth_x));
+            std::memcpy(&cloud[29], &max_depth_y, sizeof(max_depth_y));
+            cloud[30] = 0.5f;
+            cloud[31] = 0.001f;
+            for (uint32_t matrix = 0; matrix < 2; ++matrix) {
+                float* rotation = cloud + 32 + matrix * 12;
+                std::fill(rotation, rotation + 12, 0.0f);
+                rotation[0] = 1.0f;
+                rotation[5] = 1.0f;
+                rotation[10] = 1.0f;
             }
         } else if (profile == ConstantProfile::random && case_index == 1) {
             constants.fill(1.0f);
