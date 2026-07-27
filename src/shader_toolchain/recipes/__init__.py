@@ -20,6 +20,7 @@ from .copy_rgba import apply_copy_rgba_recipe
 from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
 from .cube_map_face_present import apply_cube_map_face_present_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
+from .gui import apply_gui_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
 from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
@@ -61,6 +62,7 @@ RECIPES = (
     apply_blur_vol_a_recipe,
     apply_blur_vol_b_recipe,
     apply_bloom_upres_depth_recipe,
+    apply_gui_recipe,
 )
 
 
