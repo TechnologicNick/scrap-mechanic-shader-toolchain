@@ -28,6 +28,7 @@ from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
+from .post_dof import apply_post_dof_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 from .save_paused import apply_save_paused_recipe
@@ -67,6 +68,7 @@ RECIPES = (
     apply_gui_recipe,
     apply_cmp_water_normal_recipe,
     apply_cmp_water_init_spectrum_recipe,
+    apply_post_dof_recipe,
 )
 
 
