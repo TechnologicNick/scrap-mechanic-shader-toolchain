@@ -470,6 +470,17 @@ public:
                 value = random.unit() * 4.0f - 2.0f;
             }
         } else if (profile == ConstantProfile::projection) {
+            for (uint32_t matrix_register = 0; matrix_register <= 44;
+                 matrix_register += 4) {
+                constants[(matrix_register + 0) * 4 + 0] = 1.0f;
+                constants[(matrix_register + 1) * 4 + 1] = 1.0f;
+                constants[(matrix_register + 2) * 4 + 2] = 1.0f;
+                constants[(matrix_register + 3) * 4 + 3] = 1.0f;
+            }
+            constants[2 * 4 + 2] = -2.0f;
+            constants[3 * 4 + 2] = -1.0f;
+            constants[49 * 4 + 2] = 1.0f;
+            constants[49 * 4 + 3] = 1.0f;
             std::memcpy(
                 &constants[51 * 4], &options_.width, sizeof(options_.width));
             std::memcpy(
