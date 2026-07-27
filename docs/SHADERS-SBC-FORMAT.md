@@ -146,10 +146,33 @@ DXBC hashes. Normalization removes decompiler timestamps and repairs mechanical
 compute-signature defects using the authoritative DXBC thread-group declaration,
 making repeated runs byte-for-byte reproducible.
 
+### Shared-code factoring
+
+The module format is `factored-hlsl-v1`. Instead of repeating a complete
+decompilation under every shader-key branch, the renderer recursively extracts
+common line prefixes and suffixes and clusters variants at each divergence. The
+result is a nested, valid HLSL preprocessor tree.
+
+When an original compile definition exactly identifies a cluster, the generated
+condition uses that name. Definitions containing values are restored as normal
+macros, so a cached `GROUP_SIZE_X=8` becomes `#define GROUP_SIZE_X 8` and can be
+used by conditions and direct compilation. A selector-key expression is retained
+as the unambiguous fallback.
+
+Every generated selection line carries an `SM_SELECT` membership annotation.
+The verifier evaluates the real condition for every selector using the manifest
+definitions and requires it to equal the annotation. It also validates the
+selector-to-definition bridge and expands all variants back to their original
+token fingerprints. Thus factoring is lossless and generated control metadata
+cannot be changed silently.
+
+On the validated cache, the flat modules total 102,490,876 bytes and the factored
+modules total 51,197,843 bytes, reducing HLSL storage by approximately 50%.
+
 ## Cache serialization
 
 The reverse path uses the retained manifest as the authoritative table layout.
-Corpus format version 2 records a token fingerprint for every HLSL branch and
+Corpus format version 2 records a token fingerprint for every expanded HLSL branch and
 the hash of its exact original DXBC. Comments and whitespace are excluded from
 the token fingerprint.
 

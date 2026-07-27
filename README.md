@@ -2,8 +2,8 @@
 
 This Windows tool reconstructs a Scrap Mechanic 1.0.x `shaders.sbc` cache as a
 deterministic corpus of exactly 80 HLSL module files. The validated cache
-contains 4,141 unique Shader Model 5 programs. Every program is retained as a
-selector-controlled branch in the module named by its recovered source stem.
+contains 4,141 unique Shader Model 5 programs. Variants are merged into the
+module named by their recovered source stem, with common HLSL emitted once.
 
 The original source code is not stored in the cache. The generated files are
 HLSL lifts of optimized DXBC bytecode, not the original comments, includes,
@@ -65,9 +65,15 @@ output/
 `-- manifest.json
 ```
 
-Each module contains one `#if`/`#elif` branch per cached permutation. Define the
-branch's `SM_SHADER_<16-hex-digit-key>` symbol and use the entry point shown in
-its adjacent comment or manifest record when compiling a particular lift.
+Each module is a nested preprocessor decision tree. Shared prefixes and suffixes
+are emitted once, and divergences use recovered permutation definitions such as
+`VS_FULL_TRANSFORM` or `TRANSFER_NORMAL` when they describe the split. Opaque
+`SM_SHADER_<16-hex-digit-key>` conditions are used only when the original
+definitions cannot distinguish a group.
+
+Define one `SM_SHADER_<key>` symbol when compiling a module. Its generated
+selector bridge defines the exact original flags, including valued definitions
+such as `GROUP_SIZE_X=8`, and selects the appropriate shared-code path.
 `manifest.json` records every cache job, shader key, original descriptor and
 define set, stage, entry point, resource-ID association, DXBC hash, lift backend,
 and lift status. It also records a comment/whitespace-insensitive token
@@ -80,6 +86,12 @@ marked `fallback-incomplete`. Consumers should treat all generated source as
 reverse-engineering material and the fallback branches as especially likely to
 need manual repair. The exact executable DXBC remains recoverable without this
 loss.
+
+The validated corpus shrinks from 102,490,876 bytes of flat duplicated HLSL to
+51,197,843 bytes in 80 factored modules, a reduction of approximately 50%.
+Generated `SM_DEFINE` and `SM_SELECT` blocks are structural metadata; edit the
+HLSL around them rather than those blocks. Verification checks that their actual
+preprocessor behavior still agrees with the manifest.
 
 ## Verify an output
 
@@ -113,10 +125,11 @@ not affect the output. Override the worker count when desired:
 uv run sm-shaders build --jobs 8 .\output .\rebuilt-shaders.sbc
 ```
 
-The default build is content-aware. Comments and formatting do not count as an
-edit. An unchanged selector uses its hash-verified original DXBC, while a branch
-whose HLSL tokens changed is compiled with its recovered entry point and Shader
-Model 5 profile. Edited shaders must preserve their reflected runtime ABI:
+The default build expands every selector through the decision tree before
+fingerprinting it. Comments and formatting do not count as an edit. Changing a
+shared block recompiles every affected selector; unaffected variants remain
+lossless. An edited selector is compiled with its recovered entry point and
+Shader Model 5 profile. Edited shaders must preserve their reflected runtime ABI:
 signatures, resource bindings, constant-buffer layouts, and compute thread-group
 dimensions. Compilation errors and ABI changes are fatal and never silently
 fall back to the old shader.
