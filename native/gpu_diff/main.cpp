@@ -35,6 +35,7 @@ struct Options {
     std::vector<uint32_t> texture_slots = {0};
     uint32_t sampler_slot = 6;
     uint32_t constant_buffer_slot = 5;
+    bool random_constants = false;
     bool point_filter = false;
     bool depth_output = false;
     bool warp = false;
@@ -159,6 +160,14 @@ Options parse_options(int argc, char** argv) {
             options.sampler_slot = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--constant-buffer-slot") {
             options.constant_buffer_slot = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--constant-profile") {
+            const std::string profile = value();
+            if (profile == "random") {
+                options.random_constants = true;
+            } else if (profile != "projection") {
+                throw std::runtime_error(
+                    "constant profile must be projection or random");
+            }
         } else if (name == "--filter") {
             const std::string filter = value();
             if (filter == "point") {
@@ -272,6 +281,24 @@ public:
             values.data(),
             options_.width * 4 * sizeof(float),
             0);
+    }
+
+    void update_constants(uint32_t case_index) {
+        if (!options_.random_constants) {
+            return;
+        }
+        std::array<float, 62 * 4> constants{};
+        if (case_index == 1) {
+            constants.fill(1.0f);
+        } else if (case_index > 1) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            for (float& value : constants) {
+                value = random.unit() * 4.0f - 2.0f;
+            }
+        }
+        context_->UpdateSubresource(
+            constant_buffer_.Get(), 0, nullptr, constants.data(), 0, 0);
     }
 
     std::vector<float> render(ID3D11PixelShader* shader) {
@@ -412,7 +439,7 @@ private:
 
         D3D11_BUFFER_DESC buffer_description{};
         buffer_description.ByteWidth = 62 * 16;
-        buffer_description.Usage = D3D11_USAGE_IMMUTABLE;
+        buffer_description.Usage = D3D11_USAGE_DEFAULT;
         buffer_description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         std::array<float, 62 * 4> constants{};
         constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
@@ -766,6 +793,7 @@ int main(int argc, char** argv) {
                 }
                 runner.update_input(resource, inputs[resource]);
             }
+            runner.update_constants(index);
             const auto baseline = runner.render(runner.baseline_shader());
             const auto candidate = runner.render(runner.candidate_shader());
             const Comparison comparison = compare_outputs(
@@ -824,6 +852,9 @@ int main(int argc, char** argv) {
                   << "  \"sampler_slot\": " << options.sampler_slot << ",\n"
                   << "  \"constant_buffer_slot\": "
                   << options.constant_buffer_slot << ",\n"
+                  << "  \"constant_profile\": \""
+                  << (options.random_constants ? "random" : "projection")
+                  << "\",\n"
                   << "  \"filter\": \""
                   << (options.point_filter ? "point" : "linear") << "\",\n"
                   << "  \"output\": \""

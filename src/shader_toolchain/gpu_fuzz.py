@@ -126,6 +126,7 @@ def _invoke_harness(
     texture_slots: list[int],
     sampler_slot: int,
     constant_buffer_slot: int,
+    constant_profile: str,
     texture_filter: str,
     output_kind: str,
     failure_dir: Path | None,
@@ -157,6 +158,8 @@ def _invoke_harness(
         str(sampler_slot),
         "--constant-buffer-slot",
         str(constant_buffer_slot),
+        "--constant-profile",
+        constant_profile,
         "--filter",
         texture_filter,
         "--output",
@@ -211,12 +214,15 @@ def fuzz_semantic_shader(
     ]
     sampler_slot = int(execution.get("sampler_slot", 6))
     constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
+    constant_profile = str(execution.get("constant_profile", "projection"))
     texture_filter = str(execution.get("filter", "linear"))
     output_kind = str(execution.get("output", "color"))
     if texture_filter not in ("point", "linear"):
         raise ToolchainError(f"unsupported texture filter: {texture_filter}")
     if output_kind not in ("color", "depth"):
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
+    if constant_profile not in ("projection", "random"):
+        raise ToolchainError(f"unsupported constant profile: {constant_profile}")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
     baseline_path = corpus / pixel["dxbc_path"]
@@ -258,6 +264,7 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
+            constant_profile=constant_profile,
             texture_filter=texture_filter,
             output_kind=output_kind,
             failure_dir=None,
@@ -279,6 +286,7 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
+            constant_profile=constant_profile,
             texture_filter=texture_filter,
             output_kind=output_kind,
             failure_dir=failure_dir,
@@ -294,6 +302,7 @@ def fuzz_semantic_shader(
             "texture_slots": texture_slots,
             "sampler_slot": sampler_slot,
             "constant_buffer_slot": constant_buffer_slot,
+            "constant_profile": constant_profile,
             "filter": texture_filter,
             "output": output_kind,
         },
