@@ -17,6 +17,8 @@ def test_cascade_asset_exposes_typed_quad_and_contribution_helpers() -> None:
     assert "CascadeContribution ResolveCascadeContribution" in source
     assert "CascadeContribution GatherCascadeNeighborhood" in source
     assert "void AccumulateCascadeContribution" in source
+    assert "CascadeAccumulator FilterCascadePerimeter" in source
+    assert source.count("// SM_COVERAGE_CANARY: cascade_perimeter") == 1
     assert source.count("// SM_COVERAGE_CANARY: cascade_contribution") == 1
 
 

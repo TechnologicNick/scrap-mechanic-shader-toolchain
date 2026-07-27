@@ -21,6 +21,10 @@ COMMON_CANARIES = {
         "accumulatedIndirect = float3(16384.0, 8192.0, 4096.0); "
         "accumulatedWeight = 2048.0; return;"
     ),
+    "cascade_perimeter": (
+        "result.indirect = float3(16384.0, 8192.0, 4096.0); "
+        "result.weight = 2048.0; return result;"
+    ),
     "bilateral_weights": "return float4(16384.0, 8192.0, 4096.0, 2048.0);",
     "far_depth_exit": "o0.xy = float2(0.25, 0.75); return;",
 }

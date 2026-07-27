@@ -13,15 +13,11 @@ from .common import asset, emit_validated_module
 
 SEMANTIC_PHASE_MAP = """
 /*
-Semantic phase map
-------------------
-1. Reproject the current SSGI sample into the cascade coordinate system.
-2. Downsample depth and normal-aware neighborhoods for the first/later levels.
-3. Blend the current cascade with its coarser parent while rejecting edges.
-4. Resolve the final two-channel indirect-light and confidence result.
-
-The arithmetic remains instruction ordered so depth rejection and confidence
-round exactly like the shipped Shader Model 5 programs.
+SSGI cascade phases
+1. Reproject the center sample and build its filter plane.
+2. Gather the eight depth-aware perimeter neighborhoods.
+3. Resolve/downsample or blend the coarser parent cascade.
+Recovered accumulation order is retained for Shader Model 5 rounding.
 */
 """
 
@@ -240,6 +236,152 @@ def _lift_cascade_quad_contributions(source: str) -> str:
             )
         quad_index += 1
         index += 5
+    return "\n".join(lifted) + "\n"
+
+
+_CENTER_GATHER = re.compile(
+    r"^(?P<indent>\s*)(?P<packed>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<texture>[A-Za-z_]\w*)\.Gather\(LinearClampClamp_s, "
+    r"(?P<uv>[A-Za-z_]\w*\.[xyzw]{2})\)\.xyzw;$"
+)
+_QUAD_SAMPLE = re.compile(
+    r"^\s*(?P<destination>[A-Za-z_]\w*\.[xyzw]{3}) = "
+    r"decodedQuad0\.sample(?P<sample>[0-3]);$"
+)
+
+
+def _sum_assignment(line: str) -> tuple[str, set[str]] | None:
+    assignment = _SIMPLE_ASSIGNMENT.match(line)
+    if assignment is None:
+        return None
+    terms = assignment.group("value").split(" + ")
+    if len(terms) != 2:
+        return None
+    return assignment.group("destination"), set(terms)
+
+
+def _lift_center_indirect_gathers(source: str) -> str:
+    """Recover the four-lane center Gather and ordered indirect-light sum."""
+    lines = source.splitlines()
+    lifted: list[str] = []
+    index = 0
+    while index < len(lines):
+        gather = _CENTER_GATHER.match(lines[index])
+        if gather is None or index + 10 >= len(lines):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        packed = gather.group("packed")
+        if (
+            lines[index + 1].strip()
+            != (
+                f"{packed}.xyzw = {packed}.wzyx * "
+                "float4(65535,65535,65535,65535) + "
+                "float4(0.5,0.5,0.5,0.5);"
+            )
+            or lines[index + 2].strip()
+            != f"{packed}.xyzw = (uint4){packed}.xyzw;"
+            or lines[index + 3].strip()
+            != f"CascadeQuad decodedQuad0 = DecodeCascadeQuad((uint4){packed});"
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        samples = [_QUAD_SAMPLE.match(lines[index + offset]) for offset in range(4, 8)]
+        if any(sample is None for sample in samples):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        decoded = [sample for sample in samples if sample is not None]
+        if [sample.group("sample") for sample in decoded] != list("0123"):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        destinations = [sample.group("destination") for sample in decoded]
+        additions = [_sum_assignment(lines[index + offset]) for offset in range(8, 11)]
+        if any(addition is None for addition in additions):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        first, second, third = [addition for addition in additions if addition is not None]
+        if (
+            first[1] != {destinations[0], destinations[1]}
+            or second[1] != {first[0], destinations[2]}
+            or third[1] != {second[0], destinations[3]}
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        indent = gather.group("indent")
+        lifted.append(
+            f"{indent}{third[0]} = GatherCascadeCenterIndirect("
+            f"{gather.group('texture')}, LinearClampClamp_s, {gather.group('uv')});"
+        )
+        index += 11
+    return "\n".join(lifted) + "\n"
+
+
+_MINIMUM_DEPTH_GATHER = re.compile(
+    r"^(?P<indent>\s*)(?P<depth>[A-Za-z_]\w*)\.xyzw = "
+    r"(?P<texture>[A-Za-z_]\w*)\.GatherGreen\(PointClampClamp_s, "
+    r"(?P<uv>[A-Za-z_]\w*\.[xyzw]{2})\)\.xyzw;$"
+)
+
+
+def _lift_minimum_depth_gathers(source: str) -> str:
+    """Name the minimum decoded depth in the center Gather footprint."""
+    lines = source.splitlines()
+    lifted: list[str] = []
+    index = 0
+    while index < len(lines):
+        gather = _MINIMUM_DEPTH_GATHER.match(lines[index])
+        if gather is None or index + 5 >= len(lines):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        depth = gather.group("depth")
+        scale_assignment = _SIMPLE_ASSIGNMENT.match(lines[index + 2])
+        decoded = _DEPTH_SCALE.match(lines[index + 3])
+        pair_minimum = _SIMPLE_ASSIGNMENT.match(lines[index + 4])
+        minimum = _SIMPLE_ASSIGNMENT.match(lines[index + 5])
+        pair_base = ""
+        pair_lanes = ""
+        if pair_minimum is not None:
+            pair_base, pair_lanes = pair_minimum.group("destination").split(".")
+        if (
+            lines[index + 1].strip()
+            != f"{depth}.xyzw = {depth}.xyzw * {depth}.xyzw;"
+            or any(
+                f"dot({depth}.xyzw" in line
+                for line in lines[index + 6 : index + 26]
+            )
+            or scale_assignment is None
+            or decoded is None
+            or decoded.group("depth") != depth
+            or decoded.group("scale") != scale_assignment.group("destination")
+            or pair_minimum is None
+            or pair_minimum.group("value") != f"min({depth}.xz, {depth}.yw)"
+            or len(pair_lanes) != 2
+            or minimum is None
+            or minimum.group("value")
+            != (
+                f"min({pair_base}.{pair_lanes[0]}, "
+                f"{pair_base}.{pair_lanes[1]})"
+            )
+        ):
+            lifted.append(lines[index])
+            index += 1
+            continue
+        indent = gather.group("indent")
+        lifted.append(lines[index + 2])
+        lifted.append(
+            f"{indent}{minimum.group('destination')} = GatherMinimumCascadeDepth("
+        )
+        lifted.append(
+            f"{indent}    {gather.group('texture')}, PointClampClamp_s, "
+            f"{gather.group('uv')}, {decoded.group('scale')});"
+        )
+        index += 6
     return "\n".join(lifted) + "\n"
 
 
@@ -754,6 +896,324 @@ def _name_cascade_neighborhoods(source: str) -> str:
     return source
 
 
+_VECTOR_NORTH_WEST = re.compile(
+    r"^(?P<indent>\s*)[A-Za-z_]\w*\.xyzw = "
+    r"(?P<pixel>[A-Za-z_]\w*)\.xyxy \* "
+    r"float4\(-(?P<spacing>[0-9.]+),-(?P=spacing),[^)]+\) \+ "
+    r"(?P<center>[A-Za-z_]\w*)\.xyxy;$"
+)
+_SCALAR_NORTH_WEST = re.compile(
+    r"^(?P<indent>\s*)[A-Za-z_]\w*\.xy = "
+    r"-(?P<spacing_x>[A-Za-z_]\w*\.[xyzw]{2}) \* "
+    r"(?P<spacing_y>[A-Za-z_]\w*\.[xyzw]{2}) \+ "
+    r"(?P<center>[A-Za-z_]\w*)\.xy;$"
+)
+_SIMPLE_ASSIGNMENT = re.compile(
+    r"^\s*(?P<destination>[A-Za-z_]\w*\.[xyzw]{1,3}) = (?P<value>.+);$"
+)
+
+
+def _addition_base(line: str, contribution_term: str) -> tuple[str, str] | None:
+    assignment = _SIMPLE_ASSIGNMENT.match(line)
+    if assignment is None:
+        return None
+    terms = assignment.group("value").split(" + ")
+    if len(terms) != 2 or terms.count(contribution_term) != 1:
+        return None
+    base = terms[1] if terms[0] == contribution_term else terms[0]
+    return assignment.group("destination"), base
+
+
+def _lift_cascade_perimeter(source: str) -> str:
+    """Replace the explicit clockwise eight-tap traversal with one typed filter."""
+    lines = source.splitlines()
+    north_uv = next(
+        (index for index, line in enumerate(lines) if "float2 northWestUv =" in line),
+        None,
+    )
+    north = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "CascadeContribution northWestContribution =" in line
+        ),
+        None,
+    )
+    south_east = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "CascadeContribution southEastContribution =" in line
+        ),
+        None,
+    )
+    context = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "CascadeFilterContext cascadeFilterContext;" in line
+        ),
+        None,
+    )
+    if None in (north_uv, north, south_east, context):
+        return source
+    assert north_uv is not None
+    assert north is not None
+    assert south_east is not None
+    assert context is not None
+    start = north_uv - 3
+    if start < 0 or north + 4 >= len(lines) or south_east + 4 >= len(lines):
+        return source
+
+    vector_grid = _VECTOR_NORTH_WEST.match(lines[start])
+    scalar_grid = _SCALAR_NORTH_WEST.match(lines[start])
+    if vector_grid is not None:
+        indent = vector_grid.group("indent")
+        center_uv = f"{vector_grid.group('center')}.xy"
+        spacing = vector_grid.group("spacing")
+        tap_spacing = (
+            f"{vector_grid.group('pixel')}.xy * float2({spacing},{spacing})"
+        )
+    elif scalar_grid is not None:
+        indent = scalar_grid.group("indent")
+        center_uv = f"{scalar_grid.group('center')}.xy"
+        tap_spacing = (
+            f"{scalar_grid.group('spacing_x')} * "
+            f"{scalar_grid.group('spacing_y')}"
+        )
+    else:
+        return source
+
+    if not (north_uv < context < north < south_east):
+        return source
+    context_lines = lines[context : context + 6]
+    if len(context_lines) != 6 or any(
+        f"cascadeFilterContext.{field}" not in line
+        for field, line in zip(
+            (
+                "centerPosition",
+                "depthScale",
+                "planeScale",
+                "rejectionDistance",
+                "inverseFalloffDistance",
+            ),
+            context_lines[1:],
+            strict=True,
+        )
+    ):
+        return source
+    context_values = [
+        line.split("=", 1)[1].strip().removesuffix(";")
+        for line in context_lines[1:]
+    ]
+
+    initial_weight = _addition_base(
+        lines[north + 3], "northWestContribution.weight"
+    )
+    initial_indirect = _addition_base(
+        lines[north + 4], "northWestContribution.indirect"
+    )
+    final_weight = _addition_base(
+        lines[south_east + 3], "southEastContribution.weight"
+    )
+    final_indirect = _addition_base(
+        lines[south_east + 4], "southEastContribution.indirect"
+    )
+    if None in (initial_weight, initial_indirect, final_weight, final_indirect):
+        return source
+    assert initial_weight is not None
+    assert initial_indirect is not None
+    assert final_weight is not None
+    assert final_indirect is not None
+    if any(source.count(f"{direction}Contribution") == 0 for direction in _NEIGHBORHOOD_DIRECTIONS):
+        return source
+
+    prelude = [
+        line
+        for line in lines[north_uv + 1 : context]
+        if "cb_hdr.fMaxDepth" in line
+    ]
+    replacement = [
+        *prelude,
+        f"{indent}CascadeFilterGrid cascadeFilterGrid = {{",
+        f"{indent}    {center_uv}, {tap_spacing}, cb_vRenderScale.xy,",
+        f"{indent}    cb_vUvLimitMipDown.xy, cb_vNearFarViewCorner.zw}};",
+        f"{indent}CascadeFilterContext cascadeFilterContext = {{",
+        f"{indent}    {context_values[0]}, {context_values[1]}, "
+        f"{context_values[2]},",
+        f"{indent}    {context_values[3]}, {context_values[4]}}};",
+        f"{indent}CascadeAccumulator filteredCascade = FilterCascadePerimeter(",
+        f"{indent}    tSsgi, PointClampClamp_s, cascadeFilterGrid, "
+        "cascadeFilterContext,",
+        f"{indent}    {initial_weight[1]}, {initial_indirect[1]});",
+        f"{indent}{final_weight[0]} = filteredCascade.weight;",
+        f"{indent}{final_indirect[0]} = filteredCascade.indirect;",
+    ]
+    return "\n".join([*lines[:start], *replacement, *lines[south_east + 5 :]]) + "\n"
+
+
+def _lift_parent_range_encode(source: str) -> str:
+    """Name parent-cascade range compression before the packed-light encoder."""
+    lines = source.splitlines()
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip()
+            == "packedIndirectState.w = max(packedIndirectState.x, packedIndirectState.y);"
+        ),
+        None,
+    )
+    if start is None:
+        return source
+    end = next(
+        (
+            index
+            for index in range(start, min(start + 40, len(lines)))
+            if lines[index].strip()
+            == "o0.x = 1.52590219e-05 * packedIndirectState.x;"
+        ),
+        None,
+    )
+    required = (
+        "packedIndirectState.w = cmp(1 < packedIndirectState.w);",
+        "packedIndirectState.z = packedIndirectState.z * packedIndirectState.w;",
+        "packedIndirectState.y = saturate(0.015625 * packedIndirectState.x);",
+        "packedIndirectState.x = (uint)packedIndirectState.x << 5;",
+    )
+    if end is None or any(
+        not any(marker in line for line in lines[start : end + 1])
+        for marker in required
+    ):
+        return source
+    indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+    replacement = [
+        f"{indent}float cascadeRangeScale = ComputeCascadeRangeScale(",
+        f"{indent}    packedIndirectState.xyz, sampleCoordinateState.y);",
+        f"{indent}o0.x = EncodeCascadeIndirect("
+        "packedIndirectState.xyz * cascadeRangeScale);",
+    ]
+    return "\n".join([*lines[:start], *replacement, *lines[end + 1 :]]) + "\n"
+
+
+def _lift_view_positions_and_normals(source: str) -> str:
+    """Name repeated view-position reconstruction and octahedral normal decode."""
+    radial_view = """  sampleCoordinateState.yz = w1.xy * float2(1,-1) + float2(0,1);
+  sampleCoordinateState.yz = sampleCoordinateState.yz * float2(2,2) + float2(-1,-1);
+  sampleCoordinateState.yz = cb_vNearFarViewCorner.zw * sampleCoordinateState.yz;
+  centerDepthState.xy = sampleCoordinateState.yz * packedIndirectState.xx;
+  centerDepthState.z = -packedIndirectState.x;"""
+    final_view = """  sampleCoordinateState.xy = w1.xy * float2(1,-1) + float2(0,1);
+  sampleCoordinateState.xy = sampleCoordinateState.xy * float2(2,2) + float2(-1,-1);
+  sampleCoordinateState.xy = cb_vNearFarViewCorner.zw * sampleCoordinateState.xy;
+  sampleCoordinateState.xy = sampleCoordinateState.xy * packedIndirectState.xx;
+  sampleCoordinateState.z = -packedIndirectState.x;"""
+    parent_view = """  packedIndirectState.zw = w1.xy * float2(1,-1) + float2(0,1);
+  packedIndirectState.zw = packedIndirectState.zw * float2(2,2) + float2(-1,-1);
+  packedIndirectState.zw = cb_vNearFarViewCorner.zw * packedIndirectState.zw;
+  neighborhoodDepthA.xy = packedIndirectState.zw * sampleCoordinateState.yy;
+  neighborhoodDepthA.z = -sampleCoordinateState.y;"""
+    source = source.replace(
+        radial_view,
+        "  centerDepthState.xyz = ReconstructCascadeViewPosition(\n"
+        "      w1.xy, packedIndirectState.x, cb_vNearFarViewCorner.zw);",
+    )
+    source = source.replace(
+        final_view,
+        "  sampleCoordinateState.xyz = ReconstructCascadeViewPosition(\n"
+        "      w1.xy, packedIndirectState.x, cb_vNearFarViewCorner.zw);",
+    )
+    source = source.replace(
+        parent_view,
+        "  neighborhoodDepthA.xyz = ReconstructCascadeViewPosition(\n"
+        "      w1.xy, sampleCoordinateState.y, cb_vNearFarViewCorner.zw);",
+    )
+
+    final_normal = """  centerDepthState.xy = tNormal.SampleLevel(PointClampClamp_s, v1.xy, 0).xy;
+  centerDepthState.xy = centerDepthState.xy * float2(2,2) + float2(-1,-1);
+  sampleCoordinateState.w = 1 + -abs(centerDepthState.x);
+  normalDecodeState.z = sampleCoordinateState.w + -abs(centerDepthState.y);
+  sampleCoordinateState.w = saturate(-normalDecodeState.z);
+  centerDepthState.zw = cmp(centerDepthState.xy >= float2(0,0));
+  centerDepthState.zw = centerDepthState.zw ? -sampleCoordinateState.ww : sampleCoordinateState.ww;
+  normalDecodeState.xy = centerDepthState.xy + centerDepthState.zw;
+  sampleCoordinateState.w = dot(normalDecodeState.xyz, normalDecodeState.xyz);
+  sampleCoordinateState.w = rsqrt(sampleCoordinateState.w);
+  centerDepthState.xyz = normalDecodeState.xyz * sampleCoordinateState.www;"""
+    downsample_normal = """  sampleCoordinateState.yz = tNormal.SampleLevel(PointClampClamp_s, v1.xy, 0).xy;
+  sampleCoordinateState.yz = sampleCoordinateState.yz * float2(2,2) + float2(-1,-1);
+  sampleCoordinateState.w = 1 + -abs(sampleCoordinateState.y);
+  normalDecodeState.z = sampleCoordinateState.w + -abs(sampleCoordinateState.z);
+  sampleCoordinateState.w = saturate(-normalDecodeState.z);
+  neighborhoodDepthA.xy = cmp(sampleCoordinateState.yz >= float2(0,0));
+  neighborhoodDepthA.xy = neighborhoodDepthA.xy ? -sampleCoordinateState.ww : sampleCoordinateState.ww;
+  normalDecodeState.xy = neighborhoodDepthA.xy + sampleCoordinateState.yz;
+  sampleCoordinateState.y = dot(normalDecodeState.xyz, normalDecodeState.xyz);
+  sampleCoordinateState.y = rsqrt(sampleCoordinateState.y);
+  sampleCoordinateState.yzw = normalDecodeState.xyz * sampleCoordinateState.yyy;"""
+    source = source.replace(
+        final_normal,
+        "  centerDepthState.xyz = DecodeCascadeNormal(\n"
+        "      tNormal.SampleLevel(PointClampClamp_s, v1.xy, 0).xy);",
+    )
+    return source.replace(
+        downsample_normal,
+        "  sampleCoordinateState.yzw = DecodeCascadeNormal(\n"
+        "      tNormal.SampleLevel(PointClampClamp_s, v1.xy, 0).xy);",
+    )
+
+
+_FAR_DEPTH_COMPARE = re.compile(
+    r"^(?P<indent>\s*)(?P<condition>[A-Za-z_]\w*\.[xyzw]) = "
+    r"cmp\(800 < (?P<depth>[A-Za-z_]\w*\.[xyzw])\);\n"
+    r"(?P=indent)if \((?P=condition) != 0\) \{$",
+    re.MULTILINE,
+)
+
+
+def _lift_far_depth_checks(source: str) -> str:
+    """Express the far-depth early exit as ordinary HLSL control flow."""
+    source = _FAR_DEPTH_COMPARE.sub(
+        lambda match: (
+            f"{match.group('indent')}if (800 < {match.group('depth')}) {{"
+        ),
+        source,
+    )
+    source = source.replace("\n// 3Dmigoto declarations\n#define cmp -\n", "\n")
+    return source
+
+
+def _compact_cascade_entrypoint(source: str) -> str:
+    signature = """void mainPS(
+  float4 v0 : SV_Position0,
+  float2 v1 : UV0,
+  float2 w1 : UNSCALED_UV0,
+  out float2 o0 : SV_Target0)
+{"""
+    compact = """void mainPS(
+  float4 v0 : SV_Position0, float2 v1 : UV0, float2 w1 : UNSCALED_UV0,
+  out float2 o0 : SV_Target0) {"""
+    source = source.replace(signature, compact)
+    return re.sub(r"\n{3,}", "\n\n", source)
+
+
+_CASCADE_STATE_DECLARATION = re.compile(
+    r"^(?P<indent>\s*)float4 (?P<names>[A-Za-z_,]+);$",
+    re.MULTILINE,
+)
+
+
+def _prune_unused_cascade_state(source: str) -> str:
+    """Remove recovered scratch registers made obsolete by structural lifts."""
+    match = _CASCADE_STATE_DECLARATION.search(source)
+    if match is None:
+        return source
+    names = match.group("names").split(",")
+    used = [name for name in names if len(re.findall(rf"\b{name}\b", source)) > 1]
+    declaration = f"{match.group('indent')}float4 {','.join(used)};"
+    return source[: match.start()] + declaration + source[match.end() :]
+
+
 def _execution(blob: bytes) -> dict[str, Any]:
     abi = ShaderReflector().abi(blob)
     textures = [resource for resource in abi["resources"] if resource["type"] == 2]
@@ -842,13 +1302,29 @@ def apply_ssgi_cascade_recipe(
             f"  {marker}",
             1,
         )
-        variants[selector] = _name_cascade_neighborhoods(
-            _lift_cascade_accumulations(
-                _lift_cascade_neighborhood_gathers(
-                    _lift_bilateral_weights(
-                        _lift_packed_indirect_encodes(
-                            _lift_cascade_quad_contributions(
-                                _lift_packed_indirect_decodes(source)
+        variants[selector] = _prune_unused_cascade_state(
+            _compact_cascade_entrypoint(
+                _lift_far_depth_checks(
+                    _lift_view_positions_and_normals(
+                        _lift_parent_range_encode(
+                            _lift_cascade_perimeter(
+                                _name_cascade_neighborhoods(
+                                    _lift_cascade_accumulations(
+                                        _lift_cascade_neighborhood_gathers(
+                                            _lift_bilateral_weights(
+                                                _lift_packed_indirect_encodes(
+                                                    _lift_minimum_depth_gathers(
+                                                        _lift_center_indirect_gathers(
+                                                            _lift_cascade_quad_contributions(
+                                                                _lift_packed_indirect_decodes(source)
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
                             )
                         )
                     )
