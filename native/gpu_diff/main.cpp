@@ -77,6 +77,7 @@ struct Options {
         {5, ConstantProfile::projection}};
     bool depth_output = false;
     uint32_t output_components = 4;
+    uint32_t output_targets = 1;
     std::array<uint32_t, 3> thread_group = {1, 1, 1};
     bool warp = false;
 };
@@ -353,6 +354,8 @@ Options parse_options(int argc, char** argv) {
             }
         } else if (name == "--output-components") {
             options.output_components = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--output-targets") {
+            options.output_targets = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--thread-group") {
             std::stringstream values(value());
             std::string component;
@@ -381,6 +384,7 @@ Options parse_options(int argc, char** argv) {
         throw std::runtime_error("width, height, and cases must be positive");
     }
     if (options.output_components == 0 || options.output_components > 4
+        || options.output_targets == 0 || options.output_targets > 8
         || std::any_of(
             options.thread_group.begin(), options.thread_group.end(),
             [](uint32_t value) { return value == 0; })) {
@@ -389,8 +393,12 @@ Options parse_options(int argc, char** argv) {
     if (options.stage == ShaderStage::compute && options.depth_output) {
         throw std::runtime_error("compute stage does not support depth output");
     }
+    if (options.depth_output && options.output_targets != 1) {
+        throw std::runtime_error("depth output requires one output target");
+    }
     if (options.structured_output_elements > 0
-        && (options.stage != ShaderStage::compute || options.output_components != 1)) {
+        && (options.stage != ShaderStage::compute || options.output_components != 1
+            || options.output_targets != 1)) {
         throw std::runtime_error(
             "structured output requires compute stage and one output component");
     }
@@ -638,10 +646,18 @@ public:
                 context_->ClearUnorderedAccessViewUint(
                     compute_view_.Get(), clear_uint);
             } else {
-                context_->ClearUnorderedAccessViewFloat(compute_view_.Get(), clear);
+                for (const auto& view : compute_views_) {
+                    context_->ClearUnorderedAccessViewFloat(view.Get(), clear);
+                }
             }
-            ID3D11UnorderedAccessView* view = compute_view_.Get();
-            context_->CSSetUnorderedAccessViews(0, 1, &view, nullptr);
+            std::vector<ID3D11UnorderedAccessView*> views;
+            if (options_.structured_output_elements > 0) {
+                views.push_back(compute_view_.Get());
+            } else {
+                for (const auto& view : compute_views_) views.push_back(view.Get());
+            }
+            context_->CSSetUnorderedAccessViews(
+                0, static_cast<UINT>(views.size()), views.data(), nullptr);
             context_->CSSetShader(
                 candidate ? candidate_compute_shader_.Get()
                           : baseline_compute_shader_.Get(),
@@ -653,13 +669,16 @@ public:
                 (options_.height + options_.thread_group[1] - 1)
                     / options_.thread_group[1],
                 1);
-            ID3D11UnorderedAccessView* no_view = nullptr;
-            context_->CSSetUnorderedAccessViews(0, 1, &no_view, nullptr);
+            std::vector<ID3D11UnorderedAccessView*> no_views(views.size(), nullptr);
+            context_->CSSetUnorderedAccessViews(
+                0, static_cast<UINT>(no_views.size()), no_views.data(), nullptr);
         } else if (options_.depth_output) {
             context_->ClearDepthStencilView(
                 depth_view_.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
         } else {
-            context_->ClearRenderTargetView(render_target_view_.Get(), clear);
+            for (const auto& view : render_target_views_) {
+                context_->ClearRenderTargetView(view.Get(), clear);
+            }
         }
         if (options_.stage == ShaderStage::pixel) {
             context_->PSSetShader(
@@ -676,10 +695,50 @@ public:
             options_.structured_output_elements > 0
                 ? static_cast<ID3D11Resource*>(structured_output_.Get())
                 : options_.stage == ShaderStage::compute
-                ? static_cast<ID3D11Resource*>(compute_target_.Get())
+                ? static_cast<ID3D11Resource*>(compute_targets_.front().Get())
                 : options_.depth_output
                 ? static_cast<ID3D11Resource*>(depth_target_.Get())
-                : static_cast<ID3D11Resource*>(render_target_.Get());
+                : static_cast<ID3D11Resource*>(render_targets_.front().Get());
+        if (options_.structured_output_elements == 0 && !options_.depth_output) {
+            std::vector<float> output;
+            const auto& targets = options_.stage == ShaderStage::compute
+                ? compute_targets_ : render_targets_;
+            for (size_t target = 0; target < targets.size(); ++target) {
+                context_->CopyResource(staging_targets_[target].Get(), targets[target].Get());
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                check(context_->Map(
+                    staging_targets_[target].Get(), 0, D3D11_MAP_READ, 0, &mapped),
+                    "Map color output");
+                const size_t components = options_.output_components;
+                const size_t old_size = output.size();
+                output.resize(old_size + static_cast<size_t>(options_.width)
+                    * options_.height * components);
+                const size_t row_size = static_cast<size_t>(options_.width)
+                    * components * sizeof(float);
+                for (uint32_t y = 0; y < options_.height; ++y) {
+                    if (components == 3) {
+                        const float* source = reinterpret_cast<const float*>(
+                            static_cast<const uint8_t*>(mapped.pData)
+                                + y * mapped.RowPitch);
+                        float* destination = output.data() + old_size
+                            + static_cast<size_t>(y) * options_.width * 3;
+                        for (uint32_t x = 0; x < options_.width; ++x) {
+                            std::memcpy(destination + x * 3, source + x * 4,
+                                3 * sizeof(float));
+                        }
+                    } else {
+                        std::memcpy(
+                            reinterpret_cast<uint8_t*>(output.data() + old_size)
+                                + y * row_size,
+                            static_cast<const uint8_t*>(mapped.pData)
+                                + y * mapped.RowPitch,
+                            row_size);
+                    }
+                }
+                context_->Unmap(staging_targets_[target].Get(), 0);
+            }
+            return output;
+        }
         context_->CopyResource(staging_resource, output_resource);
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -712,7 +771,9 @@ private:
         switch (options_.output_components) {
         case 1: return DXGI_FORMAT_R32_FLOAT;
         case 2: return DXGI_FORMAT_R32G32_FLOAT;
-        case 3: return DXGI_FORMAT_R32G32B32_FLOAT;
+        // D3D11 does not permit R32G32B32_FLOAT render targets/UAVs. Store an
+        // unused alpha channel and compact it during readback.
+        case 3: return DXGI_FORMAT_R32G32B32A32_FLOAT;
         case 4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
         default: throw std::runtime_error("invalid output component count");
         }
@@ -889,20 +950,19 @@ private:
                         structured_output_.Get(), nullptr, &compute_view_),
                     "Create structured UnorderedAccessView");
             } else {
-                compute_target_ = create_texture(
-                    D3D11_USAGE_DEFAULT,
-                    D3D11_BIND_UNORDERED_ACCESS,
-                    0,
-                    output_format());
-                staging_ = create_texture(
-                    D3D11_USAGE_STAGING,
-                    0,
-                    D3D11_CPU_ACCESS_READ,
-                    output_format());
-                check(
-                    device_->CreateUnorderedAccessView(
-                        compute_target_.Get(), nullptr, &compute_view_),
-                    "CreateUnorderedAccessView");
+                for (uint32_t index = 0; index < options_.output_targets; ++index) {
+                    compute_targets_.push_back(create_texture(
+                        D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0,
+                        output_format()));
+                    staging_targets_.push_back(create_texture(
+                        D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ,
+                        output_format()));
+                    ComPtr<ID3D11UnorderedAccessView> view;
+                    check(device_->CreateUnorderedAccessView(
+                        compute_targets_.back().Get(), nullptr, &view),
+                        "CreateUnorderedAccessView");
+                    compute_views_.push_back(std::move(view));
+                }
             }
         } else if (options_.depth_output) {
             depth_target_ = create_texture(
@@ -920,16 +980,19 @@ private:
                     depth_target_.Get(), nullptr, &depth_view_),
                 "CreateDepthStencilView");
         } else {
-            render_target_ = create_texture(
-                D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
-            staging_ = create_texture(
-                D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
-        }
-        if (options_.stage == ShaderStage::pixel && !options_.depth_output) {
-            check(
-                device_->CreateRenderTargetView(
-                    render_target_.Get(), nullptr, &render_target_view_),
-                "CreateRenderTargetView");
+            for (uint32_t index = 0; index < options_.output_targets; ++index) {
+                render_targets_.push_back(create_texture(
+                    D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0,
+                    output_format()));
+                staging_targets_.push_back(create_texture(
+                    D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ,
+                    output_format()));
+                ComPtr<ID3D11RenderTargetView> view;
+                check(device_->CreateRenderTargetView(
+                    render_targets_.back().Get(), nullptr, &view),
+                    "CreateRenderTargetView");
+                render_target_views_.push_back(std::move(view));
+            }
         }
 
         D3D11_BUFFER_DESC buffer_description{};
@@ -989,7 +1052,6 @@ private:
         viewport.Width = static_cast<float>(options_.width);
         viewport.Height = static_cast<float>(options_.height);
         viewport.MaxDepth = 1.0f;
-        ID3D11RenderTargetView* target = render_target_view_.Get();
         if (options_.stage == ShaderStage::pixel) {
             context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
@@ -1032,7 +1094,10 @@ private:
             context_->OMSetDepthStencilState(depth_state_.Get(), 0);
             context_->OMSetRenderTargets(0, nullptr, depth_view_.Get());
         } else {
-            context_->OMSetRenderTargets(1, &target, nullptr);
+            std::vector<ID3D11RenderTargetView*> targets;
+            for (const auto& target : render_target_views_) targets.push_back(target.Get());
+            context_->OMSetRenderTargets(
+                static_cast<UINT>(targets.size()), targets.data(), nullptr);
         }
     }
 
@@ -1048,17 +1113,19 @@ private:
     ComPtr<ID3D11ComputeShader> candidate_compute_shader_;
     std::vector<ComPtr<ID3D11Resource>> inputs_;
     std::vector<ComPtr<ID3D11Buffer>> structured_inputs_;
-    ComPtr<ID3D11Texture2D> render_target_;
+    std::vector<ComPtr<ID3D11Texture2D>> render_targets_;
     ComPtr<ID3D11Texture2D> depth_target_;
-    ComPtr<ID3D11Texture2D> compute_target_;
+    std::vector<ComPtr<ID3D11Texture2D>> compute_targets_;
     ComPtr<ID3D11Buffer> structured_output_;
     ComPtr<ID3D11Buffer> structured_staging_;
     ComPtr<ID3D11Texture2D> staging_;
+    std::vector<ComPtr<ID3D11Texture2D>> staging_targets_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> structured_input_views_;
-    ComPtr<ID3D11RenderTargetView> render_target_view_;
+    std::vector<ComPtr<ID3D11RenderTargetView>> render_target_views_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
     ComPtr<ID3D11UnorderedAccessView> compute_view_;
+    std::vector<ComPtr<ID3D11UnorderedAccessView>> compute_views_;
     std::vector<ComPtr<ID3D11Buffer>> constant_buffers_;
     std::vector<ComPtr<ID3D11SamplerState>> samplers_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
@@ -1444,6 +1511,7 @@ int main(int argc, char** argv) {
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
                   << "  \"output_components\": " << options.output_components << ",\n"
+                  << "  \"output_targets\": " << options.output_targets << ",\n"
                   << "  \"structured_output_elements\": "
                   << options.structured_output_elements << ",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"

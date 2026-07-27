@@ -23,6 +23,7 @@ from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
 from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
 from .cube_map_face_present import apply_cube_map_face_present_recipe
+from .cube_map_blend import apply_cube_map_blend_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
 from .gui import apply_gui_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
@@ -75,6 +76,7 @@ RECIPES = (
     apply_main_debug_drawer_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
     apply_cmp_fft_butterfly_shared_recipe,
+    apply_cube_map_blend_recipe,
 )
 
 

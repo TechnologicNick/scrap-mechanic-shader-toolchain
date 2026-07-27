@@ -223,6 +223,7 @@ def _invoke_harness(
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
     output_components: int,
+    output_targets: int,
     shader_stage: str,
     thread_group: list[int],
     failure_dir: Path | None,
@@ -275,6 +276,8 @@ def _invoke_harness(
         output_kind,
         "--output-components",
         str(output_components),
+        "--output-targets",
+        str(output_targets),
         "--thread-group",
         ",".join(str(value) for value in thread_group),
     ]
@@ -402,6 +405,7 @@ def fuzz_semantic_shader(
     output_components = int(
         execution.get("output_components", 1 if output_kind == "depth" else 4)
     )
+    output_targets = int(execution.get("output_targets", 1))
     thread_group = [int(value) for value in execution.get("thread_group", [1, 1, 1])]
     if any(sampler["filter"] not in ("point", "linear") for sampler in samplers):
         raise ToolchainError("unsupported sampler filter")
@@ -416,6 +420,10 @@ def fuzz_semantic_shader(
         raise ToolchainError("unsupported constant-buffer profile")
     if output_components < 1 or output_components > 4:
         raise ToolchainError("output component count must be between one and four")
+    if output_targets < 1 or output_targets > 8:
+        raise ToolchainError("output target count must be between one and eight")
+    if output_kind == "depth" and output_targets != 1:
+        raise ToolchainError("depth execution requires one output target")
     if len(thread_group) != 3 or any(value < 1 for value in thread_group):
         raise ToolchainError("thread group must contain three positive sizes")
     compiler = D3DCompiler()
@@ -469,6 +477,7 @@ def fuzz_semantic_shader(
             constant_buffers=constant_buffers,
             output_kind=output_kind,
             output_components=output_components,
+            output_targets=output_targets,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=None,
@@ -496,6 +505,7 @@ def fuzz_semantic_shader(
             constant_buffers=constant_buffers,
             output_kind=output_kind,
             output_components=output_components,
+            output_targets=output_targets,
             shader_stage=shader_stage,
             thread_group=thread_group,
             failure_dir=failure_dir,
@@ -517,6 +527,7 @@ def fuzz_semantic_shader(
             "constant_buffers": constant_buffers,
             "output": output_kind,
             "output_components": output_components,
+            "output_targets": output_targets,
             "thread_group": thread_group,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
