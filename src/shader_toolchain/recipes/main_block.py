@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -31,6 +31,20 @@ The large lighting permutations remain instruction-ordered so their packed
 cluster masks, comparison gathers and compiler contraction stay DXBC-faithful.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "blockPositionState", 1: "instanceAndPaintState",
+    2: "viewAndDepthState", 3: "normalAndTangentState",
+    4: "materialSampleState", 5: "clusterMaskState",
+    6: "lightIteratorState", 7: "lightGeometryState",
+    8: "attenuationState", 9: "cookieProjectionState",
+    10: "shadowProjectionState", 11: "shadowFilterState",
+    12: "reflectionState", 13: "glassRefractionState",
+    14: "directLightAccumulator", 15: "behindSurfaceState",
+    16: "gbufferState", 17: "editorVisualizationState",
+    18: "blockScratch",
+}
 
 
 def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
@@ -123,7 +137,10 @@ def apply_main_block_recipe(
         source = re.sub(
             r"(cbuffer\s+\w+)\s*:\s*register\(b[01]\)", r"\1", source
         )
-        expanded[selector] = source
+        expanded[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="Packed block lighting state remains in recovered DXBC order.",
+        )
     bodies = {
         shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
         for shader in shaders

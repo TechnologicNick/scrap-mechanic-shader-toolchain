@@ -31,9 +31,15 @@ def rename_register_state(
     """Replace anonymous decompiler registers with stable domain state names."""
     for index in sorted(names, reverse=True):
         source = re.sub(rf"\br{index}\b", names[index], source)
+    source = re.sub(r"\bbitmask\b", "packedBitmask", source)
+    source = re.sub(r"\buiDest\b", "integerDestination", source)
+    source = re.sub(r"\bfDest\b", "floatDestination", source)
     source = source.replace(
-        "  uint4 bitmask, uiDest;\n  float4 fDest;\n",
-        f"  // {note}\n",
+        "  uint4 packedBitmask, integerDestination;\n"
+        "  float4 floatDestination;\n",
+        f"  // {note}\n"
+        "  uint4 packedBitmask, integerDestination;\n"
+        "  float4 floatDestination;\n",
     )
     return source
 
