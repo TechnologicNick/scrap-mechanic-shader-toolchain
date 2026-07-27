@@ -120,6 +120,43 @@ stage must remain compatible. The manifest records its source path, token
 fingerprint, recipe name, ABI result, and whether its assembly happens to be
 exact.
 
+### GPU differential fuzzing
+
+Build the native D3D11 runner together with the decompiler dependencies, or by
+itself:
+
+```powershell
+.\scripts\build-third-party.ps1
+# or
+.\scripts\build-gpu-harness.ps1
+```
+
+Then compare the exact recovered DXBC with the current semantic FXAA shader:
+
+```powershell
+uv run sm-shaders gpu-fuzz .\output `
+  --shader post_fxaa --cases 256 --seed 0x534D465841413031 `
+  --width 64 --height 64 --report fxaa-fuzz.json
+```
+
+The runner compiles the semantic pixel shader, uses the exact recovered vertex
+shader, and renders both pixel shaders through the same D3D11 pipeline. It uses
+an `R32G32B32A32_FLOAT` source and target, linear-clamp sampling, and the
+recovered `b5`, `t0`, and `s6` bindings. Cases include flat colors, horizontal,
+vertical and diagonal edges, a checkerboard, a single-pixel impulse, gradients,
+uniform random colors, HDR values, and noisy gradients.
+
+Comparison is bit-exact by default. Explicit absolute and relative tolerances
+are available for shaders where equivalent compiler transformations introduce
+rounding differences. Every run first compares the baseline shader against
+itself at zero tolerance. On failure, `gpu-fuzz-failure/` receives the input,
+both outputs, all three DXBC programs, expanded candidate HLSL, and JSON needed
+to reproduce and inspect the case. `--warp` selects Microsoft's software D3D11
+rasterizer for a driver-independent secondary run.
+
+The validated FXAA campaigns and their limitations are recorded in
+[`docs/FXAA-GPU-FUZZING.md`](docs/FXAA-GPU-FUZZING.md).
+
 ## Verify an output
 
 ```powershell
