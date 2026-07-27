@@ -3,6 +3,7 @@
 from .bloom_downres import apply_bloom_downres_recipe
 from .bloom_last_upres import apply_bloom_last_upres_recipe
 from .bloom_upres import apply_bloom_upres_recipe
+from .compiling_shaders import apply_compiling_shaders_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .copy_blend import apply_copy_blend_recipe
 from .copy_depth import apply_copy_depth_recipe
@@ -29,6 +30,7 @@ RECIPES = (
     apply_post_downsample_recipe,
     apply_bloom_last_upres_recipe,
     apply_save_paused_recipe,
+    apply_compiling_shaders_recipe,
 )
 
 
