@@ -36,6 +36,7 @@ from .main_debug_drawer import apply_main_debug_drawer_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
+from .post_depth_to_pushmap import apply_post_depth_to_pushmap_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 from .post_sky import apply_post_sky_recipe
@@ -87,6 +88,7 @@ RECIPES = (
     apply_post_sky_recipe,
     apply_ssgi_prepass_recipe,
     apply_cmp_normal_mips_recipe,
+    apply_post_depth_to_pushmap_recipe,
 )
 
 
