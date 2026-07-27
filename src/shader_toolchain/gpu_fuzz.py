@@ -124,10 +124,9 @@ def _invoke_harness(
     absolute_tolerance: float,
     relative_tolerance: float,
     texture_slots: list[int],
-    sampler_slot: int,
+    samplers: list[dict[str, Any]],
     constant_buffer_slot: int,
     constant_profile: str,
-    texture_filter: str,
     output_kind: str,
     failure_dir: Path | None,
     warp: bool,
@@ -154,14 +153,14 @@ def _invoke_harness(
         str(relative_tolerance),
         "--texture-slots",
         ",".join(str(slot) for slot in texture_slots),
-        "--sampler-slot",
-        str(sampler_slot),
+        "--samplers",
+        ",".join(
+            f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
+        ),
         "--constant-buffer-slot",
         str(constant_buffer_slot),
         "--constant-profile",
         constant_profile,
-        "--filter",
-        texture_filter,
         "--output",
         output_kind,
     ]
@@ -212,13 +211,24 @@ def fuzz_semantic_shader(
             "texture_slots", [execution.get("texture_slot", 0)]
         )
     ]
-    sampler_slot = int(execution.get("sampler_slot", 6))
+    samplers = execution.get(
+        "samplers",
+        [
+            {
+                "slot": int(execution.get("sampler_slot", 6)),
+                "filter": str(execution.get("filter", "linear")),
+            }
+        ],
+    )
+    samplers = [
+        {"slot": int(sampler["slot"]), "filter": str(sampler["filter"])}
+        for sampler in samplers
+    ]
     constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
     constant_profile = str(execution.get("constant_profile", "projection"))
-    texture_filter = str(execution.get("filter", "linear"))
     output_kind = str(execution.get("output", "color"))
-    if texture_filter not in ("point", "linear"):
-        raise ToolchainError(f"unsupported texture filter: {texture_filter}")
+    if any(sampler["filter"] not in ("point", "linear") for sampler in samplers):
+        raise ToolchainError("unsupported sampler filter")
     if output_kind not in ("color", "depth"):
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if constant_profile not in ("projection", "random"):
@@ -262,10 +272,9 @@ def fuzz_semantic_shader(
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
             texture_slots=texture_slots,
-            sampler_slot=sampler_slot,
+            samplers=samplers,
             constant_buffer_slot=constant_buffer_slot,
             constant_profile=constant_profile,
-            texture_filter=texture_filter,
             output_kind=output_kind,
             failure_dir=None,
             warp=warp,
@@ -284,10 +293,9 @@ def fuzz_semantic_shader(
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
             texture_slots=texture_slots,
-            sampler_slot=sampler_slot,
+            samplers=samplers,
             constant_buffer_slot=constant_buffer_slot,
             constant_profile=constant_profile,
-            texture_filter=texture_filter,
             output_kind=output_kind,
             failure_dir=failure_dir,
             warp=warp,
@@ -300,10 +308,9 @@ def fuzz_semantic_shader(
         "semantic_recipe": pixel["semantic_recipe"],
         "semantic_execution": {
             "texture_slots": texture_slots,
-            "sampler_slot": sampler_slot,
+            "samplers": samplers,
             "constant_buffer_slot": constant_buffer_slot,
             "constant_profile": constant_profile,
-            "filter": texture_filter,
             "output": output_kind,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),

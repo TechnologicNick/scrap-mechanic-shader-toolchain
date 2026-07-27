@@ -33,10 +33,9 @@ struct Options {
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
     std::vector<uint32_t> texture_slots = {0};
-    uint32_t sampler_slot = 6;
+    std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     uint32_t constant_buffer_slot = 5;
     bool random_constants = false;
-    bool point_filter = false;
     bool depth_output = false;
     bool warp = false;
 };
@@ -157,7 +156,27 @@ Options parse_options(int argc, char** argv) {
                     static_cast<uint32_t>(parse_u64(slot)));
             }
         } else if (name == "--sampler-slot") {
-            options.sampler_slot = static_cast<uint32_t>(parse_u64(value()));
+            options.samplers.front().first =
+                static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--samplers") {
+            options.samplers.clear();
+            std::stringstream samplers(value());
+            std::string sampler;
+            while (std::getline(samplers, sampler, ',')) {
+                const size_t separator = sampler.find(':');
+                if (separator == std::string::npos) {
+                    throw std::runtime_error(
+                        "samplers must use slot:point or slot:linear");
+                }
+                const uint32_t slot = static_cast<uint32_t>(
+                    parse_u64(sampler.substr(0, separator)));
+                const std::string filter = sampler.substr(separator + 1);
+                if (filter != "point" && filter != "linear") {
+                    throw std::runtime_error(
+                        "sampler filter must be point or linear");
+                }
+                options.samplers.emplace_back(slot, filter == "point");
+            }
         } else if (name == "--constant-buffer-slot") {
             options.constant_buffer_slot = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--constant-profile") {
@@ -171,9 +190,11 @@ Options parse_options(int argc, char** argv) {
         } else if (name == "--filter") {
             const std::string filter = value();
             if (filter == "point") {
-                options.point_filter = true;
+                options.samplers.front().second = true;
             } else if (filter != "linear") {
                 throw std::runtime_error("filter must be point or linear");
+            } else {
+                options.samplers.front().second = false;
             }
         } else if (name == "--output") {
             const std::string output = value();
@@ -206,7 +227,13 @@ Options parse_options(int argc, char** argv) {
             [](uint32_t slot) {
                 return slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
             })
-        || options.sampler_slot >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
+        || options.samplers.empty()
+        || std::any_of(
+            options.samplers.begin(),
+            options.samplers.end(),
+            [](const auto& sampler) {
+                return sampler.first >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
+            })
         || options.constant_buffer_slot >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) {
         throw std::runtime_error("resource binding slot is out of range");
     }
@@ -467,17 +494,22 @@ private:
                 &buffer_description, &buffer_data, &constant_buffer_),
             "CreateBuffer");
 
-        D3D11_SAMPLER_DESC sampler_description{};
-        sampler_description.Filter = options_.point_filter
-            ? D3D11_FILTER_MIN_MAG_MIP_POINT
-            : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-        sampler_description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampler_description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
-        check(
-            device_->CreateSamplerState(&sampler_description, &sampler_),
-            "CreateSamplerState");
+        for (const auto& [slot, point] : options_.samplers) {
+            static_cast<void>(slot);
+            D3D11_SAMPLER_DESC sampler_description{};
+            sampler_description.Filter = point
+                ? D3D11_FILTER_MIN_MAG_MIP_POINT
+                : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler_description.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+            sampler_description.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+            sampler_description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+            sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
+            ComPtr<ID3D11SamplerState> sampler;
+            check(
+                device_->CreateSamplerState(&sampler_description, &sampler),
+                "CreateSamplerState");
+            samplers_.push_back(std::move(sampler));
+        }
 
         D3D11_RASTERIZER_DESC rasterizer_description{};
         rasterizer_description.FillMode = D3D11_FILL_SOLID;
@@ -504,7 +536,6 @@ private:
         viewport.Height = static_cast<float>(options_.height);
         viewport.MaxDepth = 1.0f;
         ID3D11Buffer* constant_buffer = constant_buffer_.Get();
-        ID3D11SamplerState* sampler = sampler_.Get();
         ID3D11RenderTargetView* target = render_target_view_.Get();
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
@@ -517,7 +548,11 @@ private:
             context_->PSSetShaderResources(
                 options_.texture_slots[index], 1, &input_view);
         }
-        context_->PSSetSamplers(options_.sampler_slot, 1, &sampler);
+        for (size_t index = 0; index < options_.samplers.size(); ++index) {
+            ID3D11SamplerState* sampler = samplers_[index].Get();
+            context_->PSSetSamplers(
+                options_.samplers[index].first, 1, &sampler);
+        }
         context_->RSSetState(rasterizer_state_.Get());
         context_->RSSetViewports(1, &viewport);
         if (options_.depth_output) {
@@ -544,7 +579,7 @@ private:
     ComPtr<ID3D11RenderTargetView> render_target_view_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
     ComPtr<ID3D11Buffer> constant_buffer_;
-    ComPtr<ID3D11SamplerState> sampler_;
+    std::vector<ComPtr<ID3D11SamplerState>> samplers_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
     ComPtr<ID3D11DepthStencilState> depth_state_;
 };
@@ -859,14 +894,22 @@ int main(int argc, char** argv) {
             std::cout << options.texture_slots[index];
         }
         std::cout << "],\n"
-                  << "  \"sampler_slot\": " << options.sampler_slot << ",\n"
+                  << "  \"samplers\": [";
+        for (size_t index = 0; index < options.samplers.size(); ++index) {
+            if (index != 0) {
+                std::cout << ", ";
+            }
+            std::cout << "{\"slot\": " << options.samplers[index].first
+                      << ", \"filter\": \""
+                      << (options.samplers[index].second ? "point" : "linear")
+                      << "\"}";
+        }
+        std::cout << "],\n"
                   << "  \"constant_buffer_slot\": "
                   << options.constant_buffer_slot << ",\n"
                   << "  \"constant_profile\": \""
                   << (options.random_constants ? "random" : "projection")
                   << "\",\n"
-                  << "  \"filter\": \""
-                  << (options.point_filter ? "point" : "linear") << "\",\n"
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
