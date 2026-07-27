@@ -7,6 +7,7 @@ from .bloom_upres_depth import apply_bloom_upres_depth_recipe
 from .compiling_shaders import apply_compiling_shaders_recipe
 from .cmp_water_normal import apply_cmp_water_normal_recipe
 from .cmp_water_init_spectrum import apply_cmp_water_init_spectrum_recipe
+from .cmp_cluster_to_volumetrics import apply_cmp_cluster_to_volumetrics_recipe
 from .copy_auto_hdr import apply_copy_auto_hdr_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .blur_pushmap_a import apply_blur_pushmap_a_recipe
@@ -71,6 +72,7 @@ RECIPES = (
     apply_cmp_water_init_spectrum_recipe,
     apply_post_dof_recipe,
     apply_main_debug_drawer_recipe,
+    apply_cmp_cluster_to_volumetrics_recipe,
 )
 
 

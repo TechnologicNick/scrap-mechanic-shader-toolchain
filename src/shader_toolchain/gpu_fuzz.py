@@ -217,6 +217,8 @@ def _invoke_harness(
     texture_slots: list[int],
     texture_kinds: list[str],
     texture_mips: list[int],
+    structured_inputs: list[dict[str, int]],
+    structured_output_elements: int,
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
@@ -253,6 +255,13 @@ def _invoke_harness(
                 texture_slots, texture_kinds, texture_mips, strict=True
             )
         ),
+        "--structured-inputs",
+        ",".join(
+            f"{binding['slot']}:{binding['elements']}"
+            for binding in structured_inputs
+        ),
+        "--structured-output-elements",
+        str(structured_output_elements),
         "--samplers",
         ",".join(
             f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
@@ -349,6 +358,18 @@ def fuzz_semantic_shader(
         mips < 1 or mips > 13 for mips in texture_mips
     ):
         raise ToolchainError("invalid texture mip counts")
+    structured_inputs = [
+        {"slot": int(binding["slot"]), "elements": int(binding["elements"])}
+        for binding in execution.get("structured_inputs", [])
+    ]
+    structured_output_elements = int(
+        execution.get("structured_output_elements", 0)
+    )
+    if any(
+        binding["slot"] < 0 or binding["elements"] < 1
+        for binding in structured_inputs
+    ) or structured_output_elements < 0:
+        raise ToolchainError("invalid structured-buffer binding")
     samplers = execution.get(
         "samplers",
         [
@@ -387,7 +408,9 @@ def fuzz_semantic_shader(
     if output_kind not in ("color", "depth"):
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if any(
-        binding["profile"] not in ("projection", "random", "hdr", "rect")
+        binding["profile"] not in (
+            "projection", "random", "hdr", "rect", "cluster"
+        )
         for binding in constant_buffers
     ):
         raise ToolchainError("unsupported constant-buffer profile")
@@ -440,6 +463,8 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
+            structured_inputs=structured_inputs,
+            structured_output_elements=structured_output_elements,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -465,6 +490,8 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
+            structured_inputs=structured_inputs,
+            structured_output_elements=structured_output_elements,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -484,6 +511,8 @@ def fuzz_semantic_shader(
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
             "texture_mips": texture_mips,
+            "structured_inputs": structured_inputs,
+            "structured_output_elements": structured_output_elements,
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,

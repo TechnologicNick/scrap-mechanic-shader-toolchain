@@ -26,6 +26,7 @@ enum class ConstantProfile {
     random,
     hdr,
     rect,
+    cluster,
 };
 
 struct ConstantBinding {
@@ -51,6 +52,11 @@ struct TextureBinding {
     uint32_t mip_levels;
 };
 
+struct StructuredInputBinding {
+    uint32_t slot;
+    uint32_t elements;
+};
+
 struct Options {
     ShaderStage stage = ShaderStage::pixel;
     std::filesystem::path vertex;
@@ -64,6 +70,8 @@ struct Options {
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
     std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
+    std::vector<StructuredInputBinding> structured_inputs;
+    uint32_t structured_output_elements = 0;
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
@@ -152,8 +160,9 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "random") return ConstantProfile::random;
     if (profile == "hdr") return ConstantProfile::hdr;
     if (profile == "rect") return ConstantProfile::rect;
+    if (profile == "cluster") return ConstantProfile::cluster;
     throw std::runtime_error(
-        "constant profile must be projection, random, hdr, or rect");
+        "constant profile must be projection, random, hdr, rect, or cluster");
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -162,6 +171,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::random: return "random";
     case ConstantProfile::hdr: return "hdr";
     case ConstantProfile::rect: return "rect";
+    case ConstantProfile::cluster: return "cluster";
     }
     return "unknown";
 }
@@ -261,6 +271,24 @@ Options parse_options(int argc, char** argv) {
                         : static_cast<uint32_t>(parse_u64(binding.substr(second + 1))),
                 });
             }
+        } else if (name == "--structured-inputs") {
+            options.structured_inputs.clear();
+            std::stringstream bindings(value());
+            std::string binding;
+            while (std::getline(bindings, binding, ',')) {
+                const size_t separator = binding.find(':');
+                if (separator == std::string::npos) {
+                    throw std::runtime_error(
+                        "structured inputs must use slot:elements");
+                }
+                options.structured_inputs.push_back({
+                    static_cast<uint32_t>(parse_u64(binding.substr(0, separator))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(separator + 1))),
+                });
+            }
+        } else if (name == "--structured-output-elements") {
+            options.structured_output_elements =
+                static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--sampler-slot") {
             options.samplers.front().first =
                 static_cast<uint32_t>(parse_u64(value()));
@@ -361,11 +389,16 @@ Options parse_options(int argc, char** argv) {
     if (options.stage == ShaderStage::compute && options.depth_output) {
         throw std::runtime_error("compute stage does not support depth output");
     }
+    if (options.structured_output_elements > 0
+        && (options.stage != ShaderStage::compute || options.output_components != 1)) {
+        throw std::runtime_error(
+            "structured output requires compute stage and one output component");
+    }
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
     }
-    if (options.textures.empty()) {
-        throw std::runtime_error("at least one texture slot is required");
+    if (options.textures.empty() && options.structured_inputs.empty()) {
+        throw std::runtime_error("at least one shader input is required");
     }
     if (std::any_of(
             options.textures.begin(), options.textures.end(),
@@ -379,6 +412,13 @@ Options parse_options(int argc, char** argv) {
             options.textures.end(),
             [](const TextureBinding& texture) {
                 return texture.slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+            })
+        || std::any_of(
+            options.structured_inputs.begin(),
+            options.structured_inputs.end(),
+            [](const StructuredInputBinding& input) {
+                return input.slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
+                    || input.elements == 0;
             })
         || std::any_of(
             options.samplers.begin(),
@@ -486,6 +526,17 @@ public:
         }
     }
 
+    void update_structured_input(
+        size_t index, const std::vector<uint32_t>& values) {
+        context_->UpdateSubresource(
+            structured_inputs_.at(index).Get(),
+            0,
+            nullptr,
+            values.data(),
+            0,
+            0);
+    }
+
     void update_constants(uint32_t case_index) {
         for (size_t index = 0; index < options_.constant_buffers.size(); ++index) {
             const auto constants = constant_values(
@@ -503,7 +554,12 @@ public:
     std::array<float, 62 * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
         std::array<float, 62 * 4> constants{};
-        if (profile == ConstantProfile::rect) {
+        if (profile == ConstantProfile::cluster) {
+            const uint32_t slice_size = std::min(options_.width, 64u);
+            const uint32_t depth_lights = 2;
+            std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
+            std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::rect) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
             const float extent = static_cast<float>(
@@ -577,7 +633,13 @@ public:
     std::vector<float> render(bool candidate) {
         constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (options_.stage == ShaderStage::compute) {
-            context_->ClearUnorderedAccessViewFloat(compute_view_.Get(), clear);
+            if (options_.structured_output_elements > 0) {
+                constexpr UINT clear_uint[4] = {0, 0, 0, 0};
+                context_->ClearUnorderedAccessViewUint(
+                    compute_view_.Get(), clear_uint);
+            } else {
+                context_->ClearUnorderedAccessViewFloat(compute_view_.Get(), clear);
+            }
             ID3D11UnorderedAccessView* view = compute_view_.Get();
             context_->CSSetUnorderedAccessViews(0, 1, &view, nullptr);
             context_->CSSetShader(
@@ -606,16 +668,30 @@ public:
                 0);
             context_->Draw(3, 0);
         }
-        context_->CopyResource(
-            staging_.Get(),
-            options_.stage == ShaderStage::compute
+        ID3D11Resource* staging_resource =
+            options_.structured_output_elements > 0
+                ? static_cast<ID3D11Resource*>(structured_staging_.Get())
+                : static_cast<ID3D11Resource*>(staging_.Get());
+        ID3D11Resource* output_resource =
+            options_.structured_output_elements > 0
+                ? static_cast<ID3D11Resource*>(structured_output_.Get())
+                : options_.stage == ShaderStage::compute
                 ? static_cast<ID3D11Resource*>(compute_target_.Get())
                 : options_.depth_output
                 ? static_cast<ID3D11Resource*>(depth_target_.Get())
-                : static_cast<ID3D11Resource*>(render_target_.Get()));
+                : static_cast<ID3D11Resource*>(render_target_.Get());
+        context_->CopyResource(staging_resource, output_resource);
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map output");
+        check(context_->Map(staging_resource, 0, D3D11_MAP_READ, 0, &mapped), "Map output");
+        if (options_.structured_output_elements > 0) {
+            std::vector<float> output(options_.structured_output_elements);
+            std::memcpy(
+                output.data(), mapped.pData,
+                output.size() * sizeof(uint32_t));
+            context_->Unmap(staging_resource, 0);
+            return output;
+        }
         const size_t components = options_.output_components;
         std::vector<float> output(
             static_cast<size_t>(options_.width) * options_.height * components);
@@ -627,7 +703,7 @@ public:
                 static_cast<const uint8_t*>(mapped.pData) + y * mapped.RowPitch,
                 row_size);
         }
-        context_->Unmap(staging_.Get(), 0);
+        context_->Unmap(staging_resource, 0);
         return output;
     }
 
@@ -730,6 +806,20 @@ private:
         return resource;
     }
 
+    ComPtr<ID3D11Buffer> create_structured_buffer(
+        uint32_t elements, D3D11_USAGE usage, UINT bind_flags, UINT cpu_flags) {
+        D3D11_BUFFER_DESC description{};
+        description.ByteWidth = elements * sizeof(uint32_t);
+        description.Usage = usage;
+        description.BindFlags = bind_flags;
+        description.CPUAccessFlags = cpu_flags;
+        description.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        description.StructureByteStride = sizeof(uint32_t);
+        ComPtr<ID3D11Buffer> buffer;
+        check(device_->CreateBuffer(&description, nullptr, &buffer), "Create structured buffer");
+        return buffer;
+    }
+
     void create_pipeline() {
         const auto baseline = read_binary(options_.baseline);
         const auto candidate = read_binary(options_.candidate);
@@ -769,21 +859,51 @@ private:
                 "CreateShaderResourceView");
             input_views_.push_back(std::move(view));
         }
-        if (options_.stage == ShaderStage::compute) {
-            compute_target_ = create_texture(
+        for (const StructuredInputBinding& binding : options_.structured_inputs) {
+            structured_inputs_.push_back(create_structured_buffer(
+                binding.elements,
                 D3D11_USAGE_DEFAULT,
-                D3D11_BIND_UNORDERED_ACCESS,
-                0,
-                output_format());
-            staging_ = create_texture(
-                D3D11_USAGE_STAGING,
-                0,
-                D3D11_CPU_ACCESS_READ,
-                output_format());
+                D3D11_BIND_SHADER_RESOURCE,
+                0));
+            ComPtr<ID3D11ShaderResourceView> view;
             check(
-                device_->CreateUnorderedAccessView(
-                    compute_target_.Get(), nullptr, &compute_view_),
-                "CreateUnorderedAccessView");
+                device_->CreateShaderResourceView(
+                    structured_inputs_.back().Get(), nullptr, &view),
+                "Create structured ShaderResourceView");
+            structured_input_views_.push_back(std::move(view));
+        }
+        if (options_.stage == ShaderStage::compute) {
+            if (options_.structured_output_elements > 0) {
+                structured_output_ = create_structured_buffer(
+                    options_.structured_output_elements,
+                    D3D11_USAGE_DEFAULT,
+                    D3D11_BIND_UNORDERED_ACCESS,
+                    0);
+                structured_staging_ = create_structured_buffer(
+                    options_.structured_output_elements,
+                    D3D11_USAGE_STAGING,
+                    0,
+                    D3D11_CPU_ACCESS_READ);
+                check(
+                    device_->CreateUnorderedAccessView(
+                        structured_output_.Get(), nullptr, &compute_view_),
+                    "Create structured UnorderedAccessView");
+            } else {
+                compute_target_ = create_texture(
+                    D3D11_USAGE_DEFAULT,
+                    D3D11_BIND_UNORDERED_ACCESS,
+                    0,
+                    output_format());
+                staging_ = create_texture(
+                    D3D11_USAGE_STAGING,
+                    0,
+                    D3D11_CPU_ACCESS_READ,
+                    output_format());
+                check(
+                    device_->CreateUnorderedAccessView(
+                        compute_target_.Get(), nullptr, &compute_view_),
+                    "CreateUnorderedAccessView");
+            }
         } else if (options_.depth_output) {
             depth_target_ = create_texture(
                 D3D11_USAGE_DEFAULT,
@@ -890,6 +1010,12 @@ private:
             context_->CSSetShaderResources(
                 options_.textures[index].slot, 1, &input_view);
         }
+        for (size_t index = 0; index < options_.structured_inputs.size(); ++index) {
+            ID3D11ShaderResourceView* input_view =
+                structured_input_views_[index].Get();
+            context_->CSSetShaderResources(
+                options_.structured_inputs[index].slot, 1, &input_view);
+        }
         for (size_t index = 0; index < options_.samplers.size(); ++index) {
             ID3D11SamplerState* sampler = samplers_[index].Get();
             context_->PSSetSamplers(
@@ -921,11 +1047,15 @@ private:
     ComPtr<ID3D11ComputeShader> baseline_compute_shader_;
     ComPtr<ID3D11ComputeShader> candidate_compute_shader_;
     std::vector<ComPtr<ID3D11Resource>> inputs_;
+    std::vector<ComPtr<ID3D11Buffer>> structured_inputs_;
     ComPtr<ID3D11Texture2D> render_target_;
     ComPtr<ID3D11Texture2D> depth_target_;
     ComPtr<ID3D11Texture2D> compute_target_;
+    ComPtr<ID3D11Buffer> structured_output_;
+    ComPtr<ID3D11Buffer> structured_staging_;
     ComPtr<ID3D11Texture2D> staging_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
+    std::vector<ComPtr<ID3D11ShaderResourceView>> structured_input_views_;
     ComPtr<ID3D11RenderTargetView> render_target_view_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
     ComPtr<ID3D11UnorderedAccessView> compute_view_;
@@ -1169,6 +1299,10 @@ int main(int argc, char** argv) {
                 static_cast<size_t>(options.width) * options.height * 4
                 * texture_slices(options.textures[index].kind));
         }
+        std::vector<std::vector<uint32_t>> structured_inputs;
+        for (const StructuredInputBinding& binding : options.structured_inputs) {
+            structured_inputs.emplace_back(binding.elements);
+        }
         uint64_t exact_values = 0;
         uint64_t compared_values = 0;
         double max_absolute_error = 0.0;
@@ -1194,6 +1328,19 @@ int main(int argc, char** argv) {
                     pattern = resource_pattern;
                 }
                 runner.update_input(resource, inputs[resource]);
+            }
+            for (size_t resource = 0; resource < structured_inputs.size(); ++resource) {
+                auto& values = structured_inputs[resource];
+                if (index == 0) {
+                    std::fill(values.begin(), values.end(), 0u);
+                } else if (index == 1) {
+                    std::fill(values.begin(), values.end(), 1u);
+                } else {
+                    for (uint32_t& value : values) {
+                        value = static_cast<uint32_t>(random.next());
+                    }
+                }
+                runner.update_structured_input(resource, values);
             }
             runner.update_constants(index);
             const auto baseline = runner.render(false);
@@ -1297,6 +1444,8 @@ int main(int argc, char** argv) {
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
                   << "  \"output_components\": " << options.output_components << ",\n"
+                  << "  \"structured_output_elements\": "
+                  << options.structured_output_elements << ",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
                   << "  \"exact_values\": " << exact_values << ",\n"
                   << "  \"max_absolute_error\": " << max_absolute_error << ",\n"
