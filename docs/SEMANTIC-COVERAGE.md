@@ -55,6 +55,14 @@ Both levels receive the same compile, reflection, and GPU comparison gates.
 The second level is not presented as recovered author source; it is a named,
 traceable intermediate representation designed for safe incremental lifting.
 
+Shared modules keep permutation metadata in
+`metadata/semantic-variants/<module>.json`, not in the readable HLSL. For an
+instruction-ordered module, `sm-shaders materialize` expands one selected
+permutation into standalone HLSL and removes the generated decision tree. This
+is the preferred inspection format for `main_part`, `main_asset`,
+`main_character`, particles, deferred/indirect lighting, voxel materials, and
+the other large families that have not yet converged to one shared source.
+
 ## Reproduce the audit
 
 Use `uv` for every Python entry point:

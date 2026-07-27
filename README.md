@@ -159,6 +159,30 @@ feature combinations make further restructuring especially sensitive. This is
 an intermediate semantic form: much easier to trace, while still clearly
 marked as a candidate for future helper-level lifting.
 
+Shared semantic modules do not contain selector hashes or generated
+`SM_SELECT` blocks. Reconstruction stores the selector, stage, entry point, and
+recovered definitions separately under `metadata/semantic-variants/`; builds
+prepend those definitions to the shared source in memory.
+
+Large instruction-ordered families still need variant-specific arithmetic. Do
+not read their aggregate decision tree directly. Materialize the permutation
+you want to investigate as standalone HLSL instead:
+
+```powershell
+# Inspect selectors and their recovered definitions.
+uv run sm-shaders materialize output main_part --list
+
+# Produce one normal HLSL file with all SM_SELECT dispatch removed.
+uv run sm-shaders materialize output main_part readable\main_part.hlsl `
+  --selector SM_SHADER_FFD8D5BCBA95D168
+```
+
+`--define NAME` can be repeated instead of `--selector` when the requested
+definition combination identifies exactly one permutation. The materialized
+file includes the recovered compile definitions, resolved local includes,
+stage, and entry point, so it can be read and compiled without the aggregate
+module around it.
+
 Semantic recipes are not accepted merely because they compile. Reconstruction
 compiles each generated implementation and reflects it against the recovered
 DXBC. Signatures, texture and sampler slots, constant-buffer layout, and shader

@@ -104,12 +104,38 @@ def verify_output(
         if not path.is_file():
             errors.append(f"semantic HLSL file is missing: {relative}")
             continue
+        records = [
+            shader for shader in shaders
+            if shader.get("semantic_hlsl_path") == relative
+        ]
+        sidecar = (
+            output / "metadata" / "semantic-variants" / f"{path.stem}.json"
+        )
+        expected_sidecar = [
+            {
+                "selector": shader["selector"],
+                "stage": shader["stage"],
+                "entry_point": shader["entry_point"],
+                "defines": shader["defines"],
+            }
+            for shader in sorted(records, key=lambda item: item["selector"])
+        ]
+        if not sidecar.is_file():
+            errors.append(f"semantic variant sidecar is missing: {sidecar.name}")
+        else:
+            try:
+                actual_sidecar = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeError):
+                errors.append(f"semantic variant sidecar is invalid: {sidecar.name}")
+            else:
+                if actual_sidecar != expected_sidecar:
+                    errors.append(
+                        f"semantic variant sidecar differs from manifest: {sidecar.name}"
+                    )
         variants = semantic_module_variants(
             path.read_text(encoding="utf-8", errors="strict"),
             {
-                shader["selector"]: shader["defines"]
-                for shader in shaders
-                if shader.get("semantic_hlsl_path") == relative
+                shader["selector"]: shader["defines"] for shader in records
             },
         )
         semantic_modules[relative] = {
