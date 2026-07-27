@@ -61,7 +61,10 @@ The semantic corpus has two deliberate readability levels:
   YCoCg codec, depth representation, view-position reconstruction, and
   plane/distance-aware bilateral weights. Its 36 repeated four-lane decode
   clusters are lifted into 32 typed filtered-neighborhood contributions and
-  four center-sample quads.
+  four center-sample quads. The complete Gather/depth/bilateral/decode operation
+  is shared by all 32 spatially named taps, reducing the maintained semantic
+  module from 1,618 to 987 lines with no raw neighborhood Gathers or inline
+  bilateral expansions left in the four pass bodies.
 - Instruction-ordered semantic implementations preserve the recovered
   arithmetic sequence but replace anonymous register state with stable domain
   names and document the algorithm phases. This applies to the largest or most
@@ -114,10 +117,11 @@ footprint order, scaled versus unscaled UVs, normal rejection, and parent-level
 offsets are observable. A dedicated fixture supplies valid cascade depths and
 periodic far-depth inputs. The four selectors pass 256 cases bit-exactly
 (131,072 compared values), and compile-time canaries prove the packed decoder,
-typed cascade contribution, bilateral helper, far-depth exit, packed encoder
-where applicable, and each downsample/final/upscale pass are reached.
+typed cascade contribution, contribution accumulator, bilateral helper,
+far-depth exit, packed encoder where applicable, and each
+downsample/final/upscale pass are reached.
 The integration corpus digest for this audit is
-`b5f7b9c1d6c08f964a119a7df40d82bedbf3411d453e91826384890ae170df38`.
+`d8f912c5e354bf354c2c3d6c92af9e900b07c8d9d7f16cfd0c67979bd2a85d46`.
 Two independent forced 32-worker builds compiled all 4,141 selectors with zero
 fallbacks and produced identical caches with SHA-256
 `7ffde1f127c83ce413d802fc5329cfcb5d6b762bb524a1b8f0e4df884d87b118`.

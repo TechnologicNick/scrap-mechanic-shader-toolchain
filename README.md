@@ -300,7 +300,11 @@ corpus or the maintained semantic HLSL.
 indirect-light codec and its plane/distance-aware bilateral rejection as typed
 helpers. Repeated four-lane Gather decoding is represented by `CascadeQuad`,
 and each filtered neighborhood is a single `CascadeContribution` containing
-its indirect light and accumulated weight. Its differential fixture uses spatially varying 8x8 inputs with
+its indirect light and accumulated weight. Each pass now builds one
+`CascadeFilterContext` and evaluates eight spatially named perimeter taps with
+`GatherCascadeNeighborhood`; depth reconstruction, bilateral rejection, packed
+light decoding, and accumulation no longer remain expanded in the shader body.
+Its differential fixture uses spatially varying 8x8 inputs with
 independent channels, preserves the native/HLSL Gather lane mapping, and adds
 explicit far-depth cases. Run both the bit-exact campaign and its path canaries:
 
