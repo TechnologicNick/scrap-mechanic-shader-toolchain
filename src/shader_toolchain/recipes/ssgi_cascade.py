@@ -8,7 +8,12 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import asset, emit_validated_module
+from .common import (
+    asset,
+    emit_validated_module,
+    ensure_recovered_cbuffer_include,
+    replace_cbuffer_with_include,
+)
 
 
 SEMANTIC_PHASE_MAP = """
@@ -1255,6 +1260,14 @@ def apply_ssgi_cascade_recipe(
     shaders = [record for record in records if record["source_name"] == "ssgi_cascade"]
     if len(shaders) != 4 or any(shader["stage"] != "pixel" for shader in shaders):
         return None
+    abi_includes = (
+        ("CB_PROJECTION", "post_volumetric_projection_abi.hlsl"),
+        ("cb_hdr_settings", "post_volumetric_hdr_abi.hlsl"),
+    )
+    for cbuffer_name, filename in abi_includes:
+        ensure_recovered_cbuffer_include(
+            staging, "ssgi_cascade", cbuffer_name, filename
+        )
     definitions = {shader["selector"]: shader["defines"] for shader in shaders}
     variants = module_variants(
         (staging / "hlsl" / "ssgi_cascade.hlsl").read_text(encoding="utf-8"),
@@ -1275,6 +1288,8 @@ def apply_ssgi_cascade_recipe(
                 lines[index] = line.replace(".Gather(", ".GatherGreen(", 1)
             previous_point_call = call_identity
         source = "\n".join(lines) + "\n"
+        for cbuffer_name, filename in abi_includes:
+            source = replace_cbuffer_with_include(source, cbuffer_name, filename)
         # UV and UNSCALED_UV occupy xy/zw of the same interpolator register.
         # Rebuild explicit HLSL values where the register-oriented decompiler
         # emitted an illegal four-component swizzle on the latter float2.

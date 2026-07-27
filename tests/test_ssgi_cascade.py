@@ -1,4 +1,4 @@
-from shader_toolchain.recipes.common import asset
+from shader_toolchain.recipes.common import asset, replace_cbuffer_with_include
 from shader_toolchain.recipes.ssgi_cascade import (
     _lift_bilateral_weights,
     _lift_cascade_accumulations,
@@ -20,6 +20,22 @@ def test_cascade_asset_exposes_typed_quad_and_contribution_helpers() -> None:
     assert "CascadeAccumulator FilterCascadePerimeter" in source
     assert source.count("// SM_COVERAGE_CANARY: cascade_perimeter") == 1
     assert source.count("// SM_COVERAGE_CANARY: cascade_contribution") == 1
+
+
+def test_recovered_cbuffer_is_replaced_by_a_readable_include() -> None:
+    source = """cbuffer Example : register(b5)
+{
+  struct { float value; } nested;
+}
+
+float ReadValue() { return nested.value; }
+"""
+
+    lifted = replace_cbuffer_with_include(source, "Example", "example_abi.hlsl")
+
+    assert lifted.startswith('#include "include/example_abi.hlsl"\n\n')
+    assert "cbuffer Example" not in lifted
+    assert "float ReadValue()" in lifted
 
 
 def test_weighted_gather_cluster_becomes_one_typed_contribution() -> None:

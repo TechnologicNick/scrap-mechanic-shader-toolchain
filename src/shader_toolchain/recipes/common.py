@@ -131,6 +131,34 @@ def ensure_recovered_cbuffer_include(
     )
 
 
+def replace_cbuffer_with_include(
+    source: str, cbuffer_name: str, filename: str
+) -> str:
+    """Replace one balanced cbuffer declaration with its recovered ABI include."""
+    marker = f"cbuffer {cbuffer_name}"
+    start = source.find(marker)
+    if start < 0:
+        raise RuntimeError(f"semantic source does not declare {cbuffer_name}")
+    opening = source.find("{", start)
+    if opening < 0:
+        raise RuntimeError(f"{cbuffer_name} declaration has no body")
+    depth = 0
+    end = None
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise RuntimeError(f"unterminated {cbuffer_name} declaration")
+    while end < len(source) and source[end] in " \t\r\n":
+        end += 1
+    return source[:start] + f'#include "include/{filename}"\n\n' + source[end:]
+
+
 def emit_validated_module(
     staging: Path,
     shaders: list[dict[str, Any]],
