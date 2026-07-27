@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .compare import compare_bytecodes, normalized_assembly
-from .hlsl import hlsl_token_sha256, module_variants, resolve_local_includes
+from .hlsl import (
+    hlsl_token_sha256,
+    module_variants,
+    resolve_local_includes,
+    semantic_module_variants,
+)
 from .reconstruct import ToolchainError, verify_output
 from .reflect import ShaderReflector
 from .sbc import D3DCompiler, lz4_compress_literals, parse_cache, parse_payload
@@ -171,7 +176,7 @@ def build_cache(
     semantic_root = corpus / "semantic"
     for relative_path in semantic_paths:
         path = corpus / relative_path
-        variants = module_variants(
+        variants = semantic_module_variants(
             path.read_text(encoding="utf-8"),
             {
                 shader["selector"]: shader["defines"]

@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .hlsl import module_variants, resolve_local_includes
+from .hlsl import module_variants, resolve_local_includes, semantic_module_variants
 from .reconstruct import ToolchainError, repository_root, verify_output
 from .sbc import D3DCompiler
 
@@ -756,7 +756,7 @@ def compile_semantic_shader(
         for record in manifest["shaders"]
         if record.get("semantic_hlsl_path") == relative
     }
-    variants = module_variants(
+    variants = semantic_module_variants(
         module_path.read_text(encoding="utf-8"), definitions
     )
     try:

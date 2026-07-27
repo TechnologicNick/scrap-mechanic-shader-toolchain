@@ -14,6 +14,7 @@ SELECTOR_LINE = re.compile(
 )
 END_MODULE = re.compile(r"(?m)^#endif\r?$")
 FACTORED_MARKER = "// SM_FACTORED_MODULE 1"
+SHARED_MARKER = "// SM_SHARED_MODULE 1"
 VARIANT_MARKER = re.compile(r"^// SM_VARIANT (SM_SHADER_[0-9A-F]{16}):")
 SELECT_MARKER = re.compile(
     r"^#(if|elif|else)(?: (.*?))? // SM_SELECT: "
@@ -43,6 +44,37 @@ def module_variants(
     if FACTORED_MARKER in source:
         return _factored_module_variants(source, definitions)
     return _legacy_module_variants(source)
+
+
+def render_shared_module(source_name: str, source: str) -> str:
+    """Render one human-authored source compiled with recovered definitions."""
+    return (
+        f"// Semantic Scrap Mechanic shader module: {source_name}.hlsl\n"
+        "// Compiled once per manifest variant with its recovered definitions.\n"
+        f"{SHARED_MARKER}\n\n"
+        + source.strip()
+        + "\n"
+    )
+
+
+def semantic_module_variants(
+    source: str, definitions: dict[str, list[str]]
+) -> dict[str, str]:
+    """Expand a shared semantic source or parse a factored semantic module."""
+    if SHARED_MARKER not in source:
+        return module_variants(source, definitions)
+    return {
+        selector: _definition_preamble(tokens) + source
+        for selector, tokens in definitions.items()
+    }
+
+
+def _definition_preamble(tokens: list[str]) -> str:
+    lines = ["// Recovered compile definitions."]
+    for token in tokens:
+        name, value = _define_parts(token)
+        lines.append(f"#define {name} {value}")
+    return "\n".join(lines) + "\n"
 
 
 def _legacy_module_variants(source: str) -> dict[str, str]:

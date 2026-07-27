@@ -90,4 +90,5 @@ def apply_post_composition_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_composition", bodies=bodies, executions=executions,
+        shared_source=body,
     )

@@ -17,6 +17,7 @@ from .hlsl import (
     module_variants,
     render_factored_module,
     resolve_local_includes,
+    semantic_module_variants,
 )
 from .sbc import D3DCompiler, parse_cache, parse_payload, safe_stem
 
@@ -103,7 +104,7 @@ def verify_output(
         if not path.is_file():
             errors.append(f"semantic HLSL file is missing: {relative}")
             continue
-        variants = module_variants(
+        variants = semantic_module_variants(
             path.read_text(encoding="utf-8", errors="strict"),
             {
                 shader["selector"]: shader["defines"]

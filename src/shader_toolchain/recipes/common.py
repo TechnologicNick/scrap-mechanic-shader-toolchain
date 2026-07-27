@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,6 +17,8 @@ from ..hlsl import (
     hlsl_token_sha256,
     module_variants,
     render_factored_module,
+    render_shared_module,
+    semantic_module_variants,
     resolve_local_includes,
 )
 from ..reflect import ShaderReflector
@@ -137,6 +140,7 @@ def emit_validated_module(
     recipe_name: str,
     bodies: dict[str, str],
     executions: dict[str, dict[str, Any]] | None = None,
+    shared_source: str | None = None,
 ) -> dict[str, Any]:
     """Emit, compile, reflect, and fingerprint one complete semantic module."""
     semantic_root = staging / "semantic"
@@ -146,12 +150,35 @@ def emit_validated_module(
     ]
     module_path = semantic_root / f"{recipe_name}.hlsl"
     module_path.write_text(
-        render_factored_module(recipe_name, variants),
+        render_shared_module(recipe_name, shared_source)
+        if shared_source is not None
+        else render_factored_module(recipe_name, variants),
         encoding="utf-8",
         newline="\n",
     )
     definitions = {shader["selector"]: shader["defines"] for shader in shaders}
-    expanded = module_variants(module_path.read_text(encoding="utf-8"), definitions)
+    expanded = semantic_module_variants(
+        module_path.read_text(encoding="utf-8"), definitions
+    )
+    metadata_dir = staging / "metadata" / "semantic-variants"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    (metadata_dir / f"{recipe_name}.json").write_text(
+        json.dumps(
+            [
+                {
+                    "selector": shader["selector"],
+                    "stage": shader["stage"],
+                    "entry_point": shader["entry_point"],
+                    "defines": shader["defines"],
+                }
+                for shader in sorted(shaders, key=lambda item: item["selector"])
+            ],
+            indent=2,
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     tasks = []
     for index, shader in enumerate(shaders):
         source = resolve_local_includes(
@@ -215,6 +242,9 @@ def emit_validated_module(
             {
                 "semantic_recipe": recipe_name,
                 "semantic_hlsl_path": f"semantic/{recipe_name}.hlsl",
+                "semantic_module_kind": (
+                    "shared" if shared_source is not None else "factored"
+                ),
                 "semantic_hlsl_token_sha256": fingerprint,
                 "semantic_assembly_exact": comparison["assembly_exact"],
                 "semantic_abi_compatible": True,

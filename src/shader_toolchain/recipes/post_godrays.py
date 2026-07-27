@@ -79,4 +79,5 @@ def apply_post_godrays_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_godrays", bodies=bodies, executions=executions,
+        shared_source=body,
     )

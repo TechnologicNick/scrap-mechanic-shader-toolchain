@@ -4,7 +4,9 @@ from shader_toolchain.hlsl import (
     HlslFormatError,
     hlsl_token_sha256,
     hlsl_tokens,
+    render_shared_module,
     resolve_local_includes,
+    semantic_module_variants,
 )
 
 
@@ -28,6 +30,27 @@ def test_tokenizer_preserves_strings_and_operators() -> None:
         "2",
         ";",
     ]
+
+
+def test_shared_semantic_module_expands_recovered_definitions() -> None:
+    source = render_shared_module(
+        "example", "#if defined(FEATURE)\nfloat value = 1;\n#endif"
+    )
+    variants = semantic_module_variants(
+        source,
+        {
+            "SM_SHADER_0000000000000001": ["PIXEL_SHADER", "FEATURE=2"],
+            "SM_SHADER_0000000000000002": ["VERTEX_SHADER"],
+        },
+    )
+
+    assert "#define PIXEL_SHADER 1" in variants["SM_SHADER_0000000000000001"]
+    assert "#define FEATURE 2" in variants["SM_SHADER_0000000000000001"]
+    assert "SM_SELECT" not in source
+    assert set(variants) == {
+        "SM_SHADER_0000000000000001",
+        "SM_SHADER_0000000000000002",
+    }
 
 
 def test_local_include_resolver_recursively_inlines_semantic_headers(tmp_path) -> None:

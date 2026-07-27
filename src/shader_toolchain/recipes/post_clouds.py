@@ -62,4 +62,5 @@ def apply_post_clouds_recipe(
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_clouds", bodies=bodies, executions=executions,
+        shared_source=vertex + "\n" + pixel,
     )
