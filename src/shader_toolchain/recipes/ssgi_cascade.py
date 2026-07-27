@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,38 @@ The arithmetic remains instruction ordered so depth rejection and confidence
 round exactly like the shipped Shader Model 5 programs.
 */
 """
+
+
+REGISTER_NAMES = {
+    "r0": "packedIndirectState",
+    "r1": "sampleCoordinateState",
+    "r2": "centerDepthState",
+    "r3": "normalDecodeState",
+    "r4": "neighborhoodDepthA",
+    "r5": "neighborhoodDepthB",
+    "r6": "neighborhoodIndirectA",
+    "r7": "neighborhoodIndirectB",
+    "r8": "edgeWeightState",
+    "r9": "bilateralWeightState",
+    "r10": "cascadeBlendState",
+    "r11": "confidenceState",
+    "r12": "weightedIndirectSum",
+    "r13": "filterScratch",
+    "r14": "parentCascadeState",
+}
+
+
+def _name_cascade_registers(source: str) -> str:
+    """Expose the stable roles in the instruction-ordered bilateral filter."""
+    for register, name in sorted(
+        REGISTER_NAMES.items(), key=lambda item: -len(item[0])
+    ):
+        source = re.sub(rf"\b{register}\b", name, source)
+    source = source.replace(
+        "  uint4 bitmask, uiDest;\n  float4 fDest;\n",
+        "  // Packed samples stay ordered to preserve the recovered lane map.\n",
+    )
+    return source
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -94,7 +127,7 @@ def apply_ssgi_cascade_recipe(
         source = source.replace("w1.xy", "v1.xy")
         source = source.replace("SM_PACKED_UV", "float4(v1.xy, w1.xy)")
         source = source.replace(".wzxy * float4(65535", ".wzyx * float4(65535")
-        variants[selector] = source
+        variants[selector] = _name_cascade_registers(source)
     bodies = {
         shader["selector"]: SEMANTIC_PHASE_MAP + variants[shader["selector"]]
         for shader in shaders
