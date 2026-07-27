@@ -32,7 +32,7 @@ struct Options {
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
-    uint32_t texture_slot = 0;
+    std::vector<uint32_t> texture_slots = {0};
     uint32_t sampler_slot = 6;
     uint32_t constant_buffer_slot = 5;
     bool point_filter = false;
@@ -145,7 +145,16 @@ Options parse_options(int argc, char** argv) {
         } else if (name == "--relative-tolerance") {
             options.relative_tolerance = parse_double(value());
         } else if (name == "--texture-slot") {
-            options.texture_slot = static_cast<uint32_t>(parse_u64(value()));
+            options.texture_slots = {
+                static_cast<uint32_t>(parse_u64(value()))};
+        } else if (name == "--texture-slots") {
+            options.texture_slots.clear();
+            std::stringstream slots(value());
+            std::string slot;
+            while (std::getline(slots, slot, ',')) {
+                options.texture_slots.push_back(
+                    static_cast<uint32_t>(parse_u64(slot)));
+            }
         } else if (name == "--sampler-slot") {
             options.sampler_slot = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--constant-buffer-slot") {
@@ -179,7 +188,15 @@ Options parse_options(int argc, char** argv) {
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
     }
-    if (options.texture_slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
+    if (options.texture_slots.empty()) {
+        throw std::runtime_error("at least one texture slot is required");
+    }
+    if (std::any_of(
+            options.texture_slots.begin(),
+            options.texture_slots.end(),
+            [](uint32_t slot) {
+                return slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+            })
         || options.sampler_slot >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
         || options.constant_buffer_slot >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) {
         throw std::runtime_error("resource binding slot is out of range");
@@ -247,9 +264,9 @@ public:
     const std::string& adapter_name() const { return adapter_name_; }
     D3D_FEATURE_LEVEL feature_level() const { return feature_level_; }
 
-    void update_input(const std::vector<float>& values) {
+    void update_input(size_t index, const std::vector<float>& values) {
         context_->UpdateSubresource(
-            input_.Get(),
+            inputs_.at(index).Get(),
             0,
             nullptr,
             values.data(),
@@ -355,7 +372,16 @@ private:
                 candidate.data(), candidate.size(), nullptr, &candidate_shader_),
             "CreatePixelShader candidate");
 
-        input_ = create_texture(D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0);
+        for (size_t index = 0; index < options_.texture_slots.size(); ++index) {
+            inputs_.push_back(create_texture(
+                D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0));
+            ComPtr<ID3D11ShaderResourceView> view;
+            check(
+                device_->CreateShaderResourceView(
+                    inputs_.back().Get(), nullptr, &view),
+                "CreateShaderResourceView");
+            input_views_.push_back(std::move(view));
+        }
         if (options_.depth_output) {
             depth_target_ = create_texture(
                 D3D11_USAGE_DEFAULT,
@@ -377,9 +403,6 @@ private:
             staging_ = create_texture(
                 D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
         }
-        check(
-            device_->CreateShaderResourceView(input_.Get(), nullptr, &input_view_),
-            "CreateShaderResourceView");
         if (!options_.depth_output) {
             check(
                 device_->CreateRenderTargetView(
@@ -444,7 +467,6 @@ private:
         viewport.Height = static_cast<float>(options_.height);
         viewport.MaxDepth = 1.0f;
         ID3D11Buffer* constant_buffer = constant_buffer_.Get();
-        ID3D11ShaderResourceView* input_view = input_view_.Get();
         ID3D11SamplerState* sampler = sampler_.Get();
         ID3D11RenderTargetView* target = render_target_view_.Get();
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -453,7 +475,11 @@ private:
             options_.constant_buffer_slot, 1, &constant_buffer);
         context_->PSSetConstantBuffers(
             options_.constant_buffer_slot, 1, &constant_buffer);
-        context_->PSSetShaderResources(options_.texture_slot, 1, &input_view);
+        for (size_t index = 0; index < options_.texture_slots.size(); ++index) {
+            ID3D11ShaderResourceView* input_view = input_views_[index].Get();
+            context_->PSSetShaderResources(
+                options_.texture_slots[index], 1, &input_view);
+        }
         context_->PSSetSamplers(options_.sampler_slot, 1, &sampler);
         context_->RSSetState(rasterizer_state_.Get());
         context_->RSSetViewports(1, &viewport);
@@ -473,11 +499,11 @@ private:
     ComPtr<ID3D11VertexShader> vertex_shader_;
     ComPtr<ID3D11PixelShader> baseline_shader_;
     ComPtr<ID3D11PixelShader> candidate_shader_;
-    ComPtr<ID3D11Texture2D> input_;
+    std::vector<ComPtr<ID3D11Texture2D>> inputs_;
     ComPtr<ID3D11Texture2D> render_target_;
     ComPtr<ID3D11Texture2D> depth_target_;
     ComPtr<ID3D11Texture2D> staging_;
-    ComPtr<ID3D11ShaderResourceView> input_view_;
+    std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
     ComPtr<ID3D11RenderTargetView> render_target_view_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
     ComPtr<ID3D11Buffer> constant_buffer_;
@@ -656,7 +682,7 @@ void preserve_failure(
     const Options& options,
     uint32_t case_index,
     const std::string& pattern,
-    const std::vector<float>& input,
+    const std::vector<std::vector<float>>& inputs,
     const std::vector<float>& baseline,
     const std::vector<float>& candidate,
     const Comparison& comparison) {
@@ -664,7 +690,12 @@ void preserve_failure(
         return;
     }
     std::filesystem::create_directories(options.failure_dir);
-    write_raw(options.failure_dir / "input.rgba32f", input);
+    for (size_t index = 0; index < inputs.size(); ++index) {
+        write_raw(
+            options.failure_dir
+                / ("input" + std::to_string(index) + ".rgba32f"),
+            inputs[index]);
+    }
     const char* output_name = options.depth_output ? "depth.r32f" : "color.rgba32f";
     write_raw(options.failure_dir / ("baseline." + std::string(output_name)), baseline);
     write_raw(options.failure_dir / ("candidate." + std::string(output_name)), candidate);
@@ -706,8 +737,10 @@ int main(int argc, char** argv) {
         const Options options = parse_options(argc, argv);
         Runner runner(options);
         SplitMix64 random{options.seed};
-        std::vector<float> input(
-            static_cast<size_t>(options.width) * options.height * 4);
+        std::vector<std::vector<float>> inputs(
+            options.texture_slots.size(),
+            std::vector<float>(
+                static_cast<size_t>(options.width) * options.height * 4));
         uint64_t exact_values = 0;
         uint64_t compared_values = 0;
         double max_absolute_error = 0.0;
@@ -720,9 +753,19 @@ int main(int argc, char** argv) {
         Comparison failure;
 
         for (uint32_t index = 0; index < options.cases; ++index) {
-            const std::string pattern = fill_case(
-                input, index, options.width, options.height, random);
-            runner.update_input(input);
+            std::string pattern;
+            for (size_t resource = 0; resource < inputs.size(); ++resource) {
+                const std::string resource_pattern = fill_case(
+                    inputs[resource],
+                    index + static_cast<uint32_t>(resource * 3),
+                    options.width,
+                    options.height,
+                    random);
+                if (resource == 0) {
+                    pattern = resource_pattern;
+                }
+                runner.update_input(resource, inputs[resource]);
+            }
             const auto baseline = runner.render(runner.baseline_shader());
             const auto candidate = runner.render(runner.candidate_shader());
             const Comparison comparison = compare_outputs(
@@ -748,7 +791,7 @@ int main(int argc, char** argv) {
                     options,
                     index,
                     pattern,
-                    input,
+                    inputs,
                     baseline,
                     candidate,
                     comparison);
@@ -770,7 +813,14 @@ int main(int argc, char** argv) {
                   << "  \"height\": " << options.height << ",\n"
                   << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
                   << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
-                  << "  \"texture_slot\": " << options.texture_slot << ",\n"
+                  << "  \"texture_slots\": [";
+        for (size_t index = 0; index < options.texture_slots.size(); ++index) {
+            if (index != 0) {
+                std::cout << ", ";
+            }
+            std::cout << options.texture_slots[index];
+        }
+        std::cout << "],\n"
                   << "  \"sampler_slot\": " << options.sampler_slot << ",\n"
                   << "  \"constant_buffer_slot\": "
                   << options.constant_buffer_slot << ",\n"

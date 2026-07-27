@@ -123,7 +123,7 @@ def _invoke_harness(
     height: int,
     absolute_tolerance: float,
     relative_tolerance: float,
-    texture_slot: int,
+    texture_slots: list[int],
     sampler_slot: int,
     constant_buffer_slot: int,
     texture_filter: str,
@@ -151,8 +151,8 @@ def _invoke_harness(
         str(absolute_tolerance),
         "--relative-tolerance",
         str(relative_tolerance),
-        "--texture-slot",
-        str(texture_slot),
+        "--texture-slots",
+        ",".join(str(slot) for slot in texture_slots),
         "--sampler-slot",
         str(sampler_slot),
         "--constant-buffer-slot",
@@ -203,7 +203,12 @@ def fuzz_semantic_shader(
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     vertex, pixel = select_shader_pair(manifest, source_name, pixel_selector)
     execution = pixel.get("semantic_execution", {})
-    texture_slot = int(execution.get("texture_slot", 0))
+    texture_slots = [
+        int(slot)
+        for slot in execution.get(
+            "texture_slots", [execution.get("texture_slot", 0)]
+        )
+    ]
     sampler_slot = int(execution.get("sampler_slot", 6))
     constant_buffer_slot = int(execution.get("constant_buffer_slot", 5))
     texture_filter = str(execution.get("filter", "linear"))
@@ -250,7 +255,7 @@ def fuzz_semantic_shader(
             height=height,
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
-            texture_slot=texture_slot,
+            texture_slots=texture_slots,
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
             texture_filter=texture_filter,
@@ -271,7 +276,7 @@ def fuzz_semantic_shader(
             height=height,
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
-            texture_slot=texture_slot,
+            texture_slots=texture_slots,
             sampler_slot=sampler_slot,
             constant_buffer_slot=constant_buffer_slot,
             texture_filter=texture_filter,
@@ -286,7 +291,7 @@ def fuzz_semantic_shader(
         "pixel_selector": pixel["selector"],
         "semantic_recipe": pixel["semantic_recipe"],
         "semantic_execution": {
-            "texture_slot": texture_slot,
+            "texture_slots": texture_slots,
             "sampler_slot": sampler_slot,
             "constant_buffer_slot": constant_buffer_slot,
             "filter": texture_filter,
