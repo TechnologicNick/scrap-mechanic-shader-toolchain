@@ -37,6 +37,7 @@ from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
 from .main_debug_drawer import apply_main_debug_drawer_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
+from .main_text import apply_main_text_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
@@ -86,6 +87,7 @@ RECIPES = (
     apply_post_dof_recipe,
     apply_main_debug_drawer_recipe,
     apply_main_clutter_impostor_recipe,
+    apply_main_text_recipe,
     apply_cmp_cluster_to_volumetrics_recipe,
     apply_cmp_fft_butterfly_shared_recipe,
     apply_cube_map_blend_recipe,

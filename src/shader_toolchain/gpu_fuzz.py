@@ -142,11 +142,48 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_TEXT_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float3 viewPosition : VIEW_POSITION0;
+    float2 uv : UV0;
+    float3 normal : NORMAL0;
+    float4 color : VERTEXCOLOR0;
+    nointerpolation float3 instanceAsg : INSTANCE_ASG0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.viewPosition = float3(positions[vertexId], -10.0);
+    output.uv = coordinates[vertexId];
+    output.normal = normalize(float3(0.35, 0.8, 0.48));
+    output.color = float4(0.25, 0.5, 0.75, 0.625);
+    output.instanceAsg = float3(0.07, 0.28, 0.875);
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
     "fullscreen_clutter_impostor": FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX,
+    "fullscreen_text": FULLSCREEN_TEXT_VERTEX,
 }
 
 
