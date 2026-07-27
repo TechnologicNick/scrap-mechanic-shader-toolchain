@@ -24,6 +24,8 @@ namespace {
 enum class ConstantProfile {
     projection,
     random,
+    composition,
+    composition_fog,
     hdr,
     rect,
     cluster,
@@ -101,6 +103,7 @@ struct Options {
     double relative_tolerance = 0.0;
     uint32_t ulp_tolerance = 0;
     std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
+    std::vector<uint32_t> smooth_texture_slots;
     std::vector<StructuredInputBinding> structured_inputs;
     uint32_t structured_output_elements = 0;
     uint32_t structured_output_stride = sizeof(uint32_t);
@@ -192,6 +195,8 @@ double parse_double(const std::string& text) {
 ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "projection") return ConstantProfile::projection;
     if (profile == "random") return ConstantProfile::random;
+    if (profile == "composition") return ConstantProfile::composition;
+    if (profile == "composition-fog") return ConstantProfile::composition_fog;
     if (profile == "hdr") return ConstantProfile::hdr;
     if (profile == "rect") return ConstantProfile::rect;
     if (profile == "cluster") return ConstantProfile::cluster;
@@ -218,6 +223,8 @@ const char* constant_profile_name(ConstantProfile profile) {
     switch (profile) {
     case ConstantProfile::projection: return "projection";
     case ConstantProfile::random: return "random";
+    case ConstantProfile::composition: return "composition";
+    case ConstantProfile::composition_fog: return "composition-fog";
     case ConstantProfile::hdr: return "hdr";
     case ConstantProfile::rect: return "rect";
     case ConstantProfile::cluster: return "cluster";
@@ -367,6 +374,16 @@ Options parse_options(int argc, char** argv) {
                     second == std::string::npos ? 4u : static_cast<uint32_t>(
                         parse_u64(binding.substr(second + 1))),
                 });
+            }
+        } else if (name == "--smooth-texture-slots") {
+            options.smooth_texture_slots.clear();
+            std::stringstream slots(value());
+            std::string slot;
+            while (std::getline(slots, slot, ',')) {
+                if (!slot.empty()) {
+                    options.smooth_texture_slots.push_back(
+                        static_cast<uint32_t>(parse_u64(slot)));
+                }
             }
         } else if (name == "--structured-output-elements") {
             options.structured_output_elements =
@@ -833,6 +850,33 @@ public:
             constants[4 * 4 + 3] = case_index == 0
                 ? 1.0f
                 : 0.5f + random.unit() * 1.5f;
+        } else if (profile == ConstantProfile::composition
+                   || profile == ConstantProfile::composition_fog) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            if (case_index == 1) {
+                constants.fill(1.0f);
+            } else if (case_index > 1) {
+                for (float& value : constants) value = random.unit();
+            }
+            for (uint32_t fog = 0; fog < 2; ++fog) {
+                float* record = constants.data() + (64 + fog * 7) * 4;
+                const bool colored = profile == ConstantProfile::composition_fog;
+                for (uint32_t component = 0; component < 4; ++component) {
+                    record[component] = colored ? random.unit() : 0.0f;
+                    record[4 + component] = colored ? random.unit() : 0.0f;
+                    record[12 + component] = colored ? random.unit() : 0.0f;
+                    record[16 + component] = colored ? random.unit() : 0.0f;
+                }
+                record[8] = random.unit() * 20.0f;
+                record[9] = 0.001f + random.unit() * 2.0f;
+                record[10] = 0.05f + random.unit() * 4.0f;
+                record[11] = 0.001f + random.unit() * 2.0f;
+                record[20] = 0.001f + random.unit() * 2.0f;
+                record[21] = 0.05f + random.unit() * 4.0f;
+                record[22] = random.unit() * 20.0f;
+                record[23] = 0.001f + random.unit() * 2.0f;
+            }
         } else if (profile == ConstantProfile::random && case_index == 1) {
             constants.fill(1.0f);
         } else if (profile == ConstantProfile::random && case_index > 1) {
@@ -1488,6 +1532,34 @@ std::string fill_case(
     return names[pattern];
 }
 
+std::string fill_smooth_case(
+    std::vector<float>& pixels,
+    uint32_t case_index,
+    uint32_t width,
+    uint32_t height,
+    uint32_t slices) {
+    const float phase = static_cast<float>(case_index % 17u) / 16.0f;
+    for (uint32_t slice = 0; slice < slices; ++slice) {
+        const float z = static_cast<float>(slice)
+            / static_cast<float>(std::max(1u, slices - 1));
+        for (uint32_t y = 0; y < height; ++y) {
+            const float v = static_cast<float>(y)
+                / static_cast<float>(std::max(1u, height - 1));
+            for (uint32_t x = 0; x < width; ++x) {
+                const float u = static_cast<float>(x)
+                    / static_cast<float>(std::max(1u, width - 1));
+                const size_t offset = (
+                    (static_cast<size_t>(slice) * height + y) * width + x) * 4;
+                pixels[offset] = 0.75f * u + 0.25f * phase;
+                pixels[offset + 1] = 0.75f * v + 0.25f * (1.0f - phase);
+                pixels[offset + 2] = 0.5f * (u + v) + 0.25f * z;
+                pixels[offset + 3] = 0.5f + 0.25f * phase;
+            }
+        }
+    }
+    return "smooth_gradient";
+}
+
 uint32_t ordered_float(float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
@@ -1654,13 +1726,21 @@ int main(int argc, char** argv) {
         for (uint32_t index = 0; index < options.cases; ++index) {
             std::string pattern;
             for (size_t resource = 0; resource < inputs.size(); ++resource) {
-                const std::string resource_pattern = fill_case(
-                    inputs[resource],
-                    index + static_cast<uint32_t>(resource * 3),
-                    options.width,
-                    options.height
-                        * texture_slices(options.textures[resource]),
-                    random);
+                const bool smooth = std::find(
+                    options.smooth_texture_slots.begin(),
+                    options.smooth_texture_slots.end(),
+                    options.textures[resource].slot)
+                    != options.smooth_texture_slots.end();
+                const std::string resource_pattern = smooth
+                    ? fill_smooth_case(
+                        inputs[resource], index, options.width, options.height,
+                        texture_slices(options.textures[resource]))
+                    : fill_case(
+                        inputs[resource],
+                        index + static_cast<uint32_t>(resource * 3),
+                        options.width,
+                        options.height * texture_slices(options.textures[resource]),
+                        random);
                 if (resource == 0) {
                     pattern = resource_pattern;
                 }
@@ -1770,6 +1850,12 @@ int main(int argc, char** argv) {
                 std::cout << ", ";
             }
             std::cout << options.textures[index].slot;
+        }
+        std::cout << "],\n"
+                  << "  \"smooth_texture_slots\": [";
+        for (size_t index = 0; index < options.smooth_texture_slots.size(); ++index) {
+            if (index != 0) std::cout << ", ";
+            std::cout << options.smooth_texture_slots[index];
         }
         std::cout << "],\n"
                   << "  \"texture_kinds\": [";

@@ -509,6 +509,7 @@ def _invoke_harness(
     texture_kinds: list[str],
     texture_mips: list[int],
     texture_slices: list[int],
+    smooth_texture_slots: list[int],
     structured_inputs: list[dict[str, int]],
     structured_output_elements: int,
     structured_output_stride: int,
@@ -562,6 +563,8 @@ def _invoke_harness(
             f"{binding['slot']}:{binding['elements']}:{binding['stride']}:{binding['profile']}"
             for binding in structured_inputs
         ),
+        "--smooth-texture-slots",
+        ",".join(str(slot) for slot in smooth_texture_slots),
         "--structured-output-elements",
         str(structured_output_elements),
         "--structured-output-stride",
@@ -688,6 +691,9 @@ def fuzz_semantic_shader(
             "texture_slices", [default_slices[kind] for kind in texture_kinds]
         )
     ]
+    smooth_texture_slots = [
+        int(slot) for slot in execution.get("smooth_texture_slots", [])
+    ]
     if len(texture_slices) != len(texture_slots) or any(
         slices < 1 or slices > 2048 for slices in texture_slices
     ) or any(
@@ -779,7 +785,7 @@ def fuzz_semantic_shader(
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if any(
         binding["profile"] not in (
-            "projection", "random", "hdr", "rect", "cluster", "reflection",
+            "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
             "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr"
         )
         for binding in constant_buffers
@@ -842,6 +848,7 @@ def fuzz_semantic_shader(
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
             texture_slices=texture_slices,
+            smooth_texture_slots=smooth_texture_slots,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -876,6 +883,7 @@ def fuzz_semantic_shader(
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
             texture_slices=texture_slices,
+            smooth_texture_slots=smooth_texture_slots,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -901,6 +909,7 @@ def fuzz_semantic_shader(
             "texture_kinds": texture_kinds,
             "texture_mips": texture_mips,
             "texture_slices": texture_slices,
+            "smooth_texture_slots": smooth_texture_slots,
             "structured_inputs": structured_inputs,
             "structured_output_elements": structured_output_elements,
             "structured_output_stride": structured_output_stride,
