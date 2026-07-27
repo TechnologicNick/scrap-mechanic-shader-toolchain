@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Extract and reconstruct HLSL modules from Scrap Mechanic shaders.sbc"
 requires-python = ">=3.11"
 
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
 [project.scripts]
 sm-shaders = "shader_toolchain.cli:main"
 
@@ -16,4 +19,3 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

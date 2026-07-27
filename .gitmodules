@@ -1,0 +1,6 @@
+[submodule "third_party/3Dmigoto"]
+	path = third_party/3Dmigoto
+	url = https://github.com/bo3b/3Dmigoto.git
+[submodule "third_party/DXDecompiler"]
+	path = third_party/DXDecompiler
+	url = https://github.com/spacehamster/DXDecompiler.git
