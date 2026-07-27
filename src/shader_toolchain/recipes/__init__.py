@@ -7,6 +7,7 @@ from .compiling_shaders import apply_compiling_shaders_recipe
 from .copy_auto_hdr import apply_copy_auto_hdr_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .copy_blend import apply_copy_blend_recipe
+from .copy_clouds import apply_copy_clouds_recipe
 from .copy_depth import apply_copy_depth_recipe
 from .copy_depth_rect_to_color import apply_copy_depth_rect_to_color_recipe
 from .copy_downscale import apply_copy_downscale_recipe
@@ -37,6 +38,7 @@ RECIPES = (
     apply_upres_clouds_recipe,
     apply_copy_depth_rect_to_color_recipe,
     apply_copy_auto_hdr_recipe,
+    apply_copy_clouds_recipe,
 )
 
 
