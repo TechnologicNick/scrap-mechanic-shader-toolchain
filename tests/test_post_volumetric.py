@@ -1,17 +1,24 @@
 from shader_toolchain.gpu_fuzz import VERTEX_HARNESSES
-from shader_toolchain.recipes.post_volumetric import _replace_quality_step
+from shader_toolchain.recipes.common import asset
+from shader_toolchain.recipes.post_volumetric import ABI_INCLUDES
 
 
-def test_volumetric_quality_modes_converge_to_one_shared_call() -> None:
-    high = """    temporalAndNoiseState.xy = viewRayAndDepthState.yy * float2(0.300000012,0.800000012) + float2(0.200000003,0.200000003);
-    viewRayAndDepthState.y = temporalAndNoiseState.y + -temporalAndNoiseState.x;
-    viewRayAndDepthState.y = pixelAndClusterState.w * viewRayAndDepthState.y + temporalAndNoiseState.x;"""
-    medium = """    viewRayAndDepthState.y = viewRayAndDepthState.y * 0.600000024 + 0.200000003;
-    reprojectionState.w = 1 + -viewRayAndDepthState.y;
-    viewRayAndDepthState.y = pixelAndClusterState.w * reprojectionState.w + viewRayAndDepthState.y;"""
-
-    assert _replace_quality_step(high) == _replace_quality_step(medium)
-    assert "SelectVolumetricMarchStep" in _replace_quality_step(high)
+def test_volumetric_asset_is_structural_shared_hlsl() -> None:
+    source = asset("post_volumetric_pixel.hlsl")
+    assert "#if defined(PS_SHADER_QUALITY_HIGH)" in source
+    assert "IntegrateClusteredVolumes" in source
+    assert "IntersectConeVolume" in source
+    assert "float4 pixelAndClusterState" not in source
+    assert "SM_SELECT" not in source
+    assert len(ABI_INCLUDES) == 5
+    for branch in (
+        "cone_mask",
+        "cone_intersection",
+        "cone_march",
+        "cone_cookie",
+        "cone_shadow",
+    ):
+        assert source.count(f"// SM_COVERAGE_CANARY: {branch}") == 1
 
 
 def test_packed_uv_harness_populates_consumed_components() -> None:
