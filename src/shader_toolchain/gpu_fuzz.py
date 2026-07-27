@@ -119,6 +119,26 @@ def select_shader_pair(
     return vertices[0], pixels[0]
 
 
+def select_compute_shader(
+    manifest: dict[str, Any], source_name: str, selector: str | None = None
+) -> dict[str, Any]:
+    shaders = [
+        shader
+        for shader in manifest["shaders"]
+        if shader["source_name"] == source_name
+        and shader["stage"] == "compute"
+        and shader.get("semantic_hlsl_path")
+    ]
+    if selector is not None:
+        shaders = [shader for shader in shaders if shader["selector"] == selector]
+    if len(shaders) != 1:
+        raise ToolchainError(
+            f"{source_name} needs exactly one semantic compute variant; "
+            f"found {len(shaders)}"
+        )
+    return shaders[0]
+
+
 def compile_semantic_shader(
     corpus: Path,
     manifest: dict[str, Any],
@@ -143,12 +163,15 @@ def compile_semantic_shader(
             f"semantic module does not contain {shader['selector']}"
         ) from error
     source = resolve_local_includes(source, module_path, semantic_root)
-    return compiler.compile(source, shader["entry_point"], "ps_5_0"), source
+    profiles = {"pixel": "ps_5_0", "compute": "cs_5_0", "vertex": "vs_5_0"}
+    return compiler.compile(
+        source, shader["entry_point"], profiles[shader["stage"]]
+    ), source
 
 
 def _invoke_harness(
     harness: Path,
-    vertex: Path,
+    vertex: Path | None,
     baseline: Path,
     candidate: Path,
     *,
@@ -164,13 +187,16 @@ def _invoke_harness(
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
+    output_components: int,
+    shader_stage: str,
+    thread_group: list[int],
     failure_dir: Path | None,
     warp: bool,
 ) -> dict[str, Any]:
     command = [
         str(harness),
-        "--vertex",
-        str(vertex),
+        "--stage",
+        shader_stage,
         "--baseline",
         str(baseline),
         "--candidate",
@@ -205,7 +231,13 @@ def _invoke_harness(
         ),
         "--output",
         output_kind,
+        "--output-components",
+        str(output_components),
+        "--thread-group",
+        ",".join(str(value) for value in thread_group),
     ]
+    if vertex is not None:
+        command.extend(("--vertex", str(vertex)))
     if failure_dir is not None:
         command.extend(("--failure-dir", str(failure_dir)))
     if warp:
@@ -238,15 +270,30 @@ def fuzz_semantic_shader(
     harness: Path | None = None,
     warp: bool = False,
 ) -> dict[str, Any]:
-    """Compile a semantic pixel shader and compare its pixels with exact DXBC."""
+    """Compile a semantic pixel or compute shader and compare exact GPU output."""
     if cases < 1 or width < 1 or height < 1:
         raise ToolchainError("cases, width, and height must be positive")
     if absolute_tolerance < 0 or relative_tolerance < 0:
         raise ToolchainError("comparison tolerances must be non-negative")
     verify_output(corpus, verify_hlsl_fingerprints=False)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
-    vertex, pixel = select_shader_pair(manifest, source_name, pixel_selector)
-    execution = pixel.get("semantic_execution", {})
+    semantic_compute = [
+        shader
+        for shader in manifest["shaders"]
+        if shader["source_name"] == source_name
+        and shader["stage"] == "compute"
+        and shader.get("semantic_hlsl_path")
+    ]
+    if semantic_compute:
+        shader = select_compute_shader(manifest, source_name, pixel_selector)
+        vertex = None
+        shader_stage = "compute"
+    else:
+        vertex, shader = select_shader_pair(manifest, source_name, pixel_selector)
+        shader_stage = "pixel"
+    execution = shader.get("semantic_execution", {})
+    width = int(execution.get("width", width))
+    height = int(execution.get("height", height))
     texture_slots = [
         int(slot)
         for slot in execution.get(
@@ -298,6 +345,10 @@ def fuzz_semantic_shader(
         for binding in constant_buffers
     ]
     output_kind = str(execution.get("output", "color"))
+    output_components = int(
+        execution.get("output_components", 1 if output_kind == "depth" else 4)
+    )
+    thread_group = [int(value) for value in execution.get("thread_group", [1, 1, 1])]
     if any(sampler["filter"] not in ("point", "linear") for sampler in samplers):
         raise ToolchainError("unsupported sampler filter")
     if output_kind not in ("color", "depth"):
@@ -307,9 +358,13 @@ def fuzz_semantic_shader(
         for binding in constant_buffers
     ):
         raise ToolchainError("unsupported constant-buffer profile")
+    if output_components < 1 or output_components > 4:
+        raise ToolchainError("output component count must be between one and four")
+    if len(thread_group) != 3 or any(value < 1 for value in thread_group):
+        raise ToolchainError("thread group must contain three positive sizes")
     compiler = D3DCompiler()
-    candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
-    baseline_path = corpus / pixel["dxbc_path"]
+    candidate, source = compile_semantic_shader(corpus, manifest, shader, compiler)
+    baseline_path = corpus / shader["dxbc_path"]
     harness_path = (
         harness
         or repository_root() / "build" / "gpu_diff" / "sm-gpu-diff.exe"
@@ -324,7 +379,10 @@ def fuzz_semantic_shader(
         temporary_path = Path(temporary)
         candidate_path = Path(temporary) / "semantic.dxbc"
         candidate_path.write_bytes(candidate)
-        if vertex is None:
+        if shader_stage == "compute":
+            vertex_path = None
+            vertex_selector = None
+        elif vertex is None:
             harness_name = str(execution["vertex_harness"])
             vertex_path = temporary_path / f"{harness_name}.dxbc"
             vertex_bytecode = compiler.compile(
@@ -352,6 +410,9 @@ def fuzz_semantic_shader(
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
+            output_components=output_components,
+            shader_stage=shader_stage,
+            thread_group=thread_group,
             failure_dir=None,
             warp=warp,
         )
@@ -374,6 +435,9 @@ def fuzz_semantic_shader(
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
+            output_components=output_components,
+            shader_stage=shader_stage,
+            thread_group=thread_group,
             failure_dir=failure_dir,
             warp=warp,
         )
@@ -381,8 +445,8 @@ def fuzz_semantic_shader(
     report = {
         "source_name": source_name,
         "vertex_selector": vertex_selector,
-        "pixel_selector": pixel["selector"],
-        "semantic_recipe": pixel["semantic_recipe"],
+        f"{shader_stage}_selector": shader["selector"],
+        "semantic_recipe": shader["semantic_recipe"],
         "semantic_execution": {
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
@@ -390,6 +454,8 @@ def fuzz_semantic_shader(
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,
+            "output_components": output_components,
+            "thread_group": thread_group,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),

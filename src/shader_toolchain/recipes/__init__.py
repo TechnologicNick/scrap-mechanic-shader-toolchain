@@ -5,6 +5,7 @@ from .bloom_last_upres import apply_bloom_last_upres_recipe
 from .bloom_upres import apply_bloom_upres_recipe
 from .bloom_upres_depth import apply_bloom_upres_depth_recipe
 from .compiling_shaders import apply_compiling_shaders_recipe
+from .cmp_water_normal import apply_cmp_water_normal_recipe
 from .copy_auto_hdr import apply_copy_auto_hdr_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .blur_pushmap_a import apply_blur_pushmap_a_recipe
@@ -63,6 +64,7 @@ RECIPES = (
     apply_blur_vol_b_recipe,
     apply_bloom_upres_depth_recipe,
     apply_gui_recipe,
+    apply_cmp_water_normal_recipe,
 )
 
 

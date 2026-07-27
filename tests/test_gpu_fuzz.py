@@ -1,6 +1,6 @@
 import pytest
 
-from shader_toolchain.gpu_fuzz import select_shader_pair
+from shader_toolchain.gpu_fuzz import select_compute_shader, select_shader_pair
 from shader_toolchain.reconstruct import ToolchainError
 
 
@@ -72,3 +72,20 @@ def test_select_shader_pair_allows_synthesized_fullscreen_vertex(harness: str) -
 
     assert vertex is None
     assert pixel["selector"] == "SM_SHADER_PIXEL"
+
+
+def test_select_compute_shader_finds_semantic_compute_variant() -> None:
+    manifest = {
+        "shaders": [
+            {
+                "source_name": "cmp_water_normal",
+                "stage": "compute",
+                "selector": "SM_SHADER_COMPUTE",
+                "semantic_hlsl_path": "semantic/cmp_water_normal.hlsl",
+            }
+        ]
+    }
+
+    shader = select_compute_shader(manifest, "cmp_water_normal")
+
+    assert shader["selector"] == "SM_SHADER_COMPUTE"

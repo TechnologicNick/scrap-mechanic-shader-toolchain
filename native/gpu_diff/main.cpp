@@ -40,6 +40,11 @@ enum class TextureKind {
     cube,
 };
 
+enum class ShaderStage {
+    pixel,
+    compute,
+};
+
 struct TextureBinding {
     uint32_t slot;
     TextureKind kind;
@@ -47,6 +52,7 @@ struct TextureBinding {
 };
 
 struct Options {
+    ShaderStage stage = ShaderStage::pixel;
     std::filesystem::path vertex;
     std::filesystem::path baseline;
     std::filesystem::path candidate;
@@ -62,6 +68,8 @@ struct Options {
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
     bool depth_output = false;
+    uint32_t output_components = 4;
+    std::array<uint32_t, 3> thread_group = {1, 1, 1};
     bool warp = false;
 };
 
@@ -198,6 +206,13 @@ Options parse_options(int argc, char** argv) {
             options.baseline = std::filesystem::u8path(value());
         } else if (name == "--candidate") {
             options.candidate = std::filesystem::u8path(value());
+        } else if (name == "--stage") {
+            const std::string stage = value();
+            if (stage == "compute") {
+                options.stage = ShaderStage::compute;
+            } else if (stage != "pixel") {
+                throw std::runtime_error("stage must be pixel or compute");
+            }
         } else if (name == "--failure-dir") {
             options.failure_dir = std::filesystem::u8path(value());
         } else if (name == "--width") {
@@ -304,8 +319,24 @@ Options parse_options(int argc, char** argv) {
             const std::string output = value();
             if (output == "depth") {
                 options.depth_output = true;
+                options.output_components = 1;
             } else if (output != "color") {
                 throw std::runtime_error("output must be color or depth");
+            }
+        } else if (name == "--output-components") {
+            options.output_components = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--thread-group") {
+            std::stringstream values(value());
+            std::string component;
+            for (size_t component_index = 0; component_index < 3; ++component_index) {
+                if (!std::getline(values, component, ',')) {
+                    throw std::runtime_error("thread group must use x,y,z");
+                }
+                options.thread_group[component_index] =
+                    static_cast<uint32_t>(parse_u64(component));
+            }
+            if (std::getline(values, component, ',')) {
+                throw std::runtime_error("thread group must use x,y,z");
             }
         } else if (name == "--warp") {
             options.warp = true;
@@ -313,11 +344,22 @@ Options parse_options(int argc, char** argv) {
             throw std::runtime_error("unknown argument: " + name);
         }
     }
-    if (options.vertex.empty() || options.baseline.empty() || options.candidate.empty()) {
-        throw std::runtime_error("--vertex, --baseline, and --candidate are required");
+    if ((options.stage == ShaderStage::pixel && options.vertex.empty())
+        || options.baseline.empty() || options.candidate.empty()) {
+        throw std::runtime_error(
+            "--baseline and --candidate are required; pixel stage also needs --vertex");
     }
     if (options.width == 0 || options.height == 0 || options.cases == 0) {
         throw std::runtime_error("width, height, and cases must be positive");
+    }
+    if (options.output_components == 0 || options.output_components > 4
+        || std::any_of(
+            options.thread_group.begin(), options.thread_group.end(),
+            [](uint32_t value) { return value == 0; })) {
+        throw std::runtime_error("output components and thread-group sizes must be positive");
+    }
+    if (options.stage == ShaderStage::compute && options.depth_output) {
+        throw std::runtime_error("compute stage does not support depth output");
     }
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
@@ -532,25 +574,49 @@ public:
         return constants;
     }
 
-    std::vector<float> render(ID3D11PixelShader* shader) {
+    std::vector<float> render(bool candidate) {
         constexpr float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        if (options_.depth_output) {
+        if (options_.stage == ShaderStage::compute) {
+            context_->ClearUnorderedAccessViewFloat(compute_view_.Get(), clear);
+            ID3D11UnorderedAccessView* view = compute_view_.Get();
+            context_->CSSetUnorderedAccessViews(0, 1, &view, nullptr);
+            context_->CSSetShader(
+                candidate ? candidate_compute_shader_.Get()
+                          : baseline_compute_shader_.Get(),
+                nullptr,
+                0);
+            context_->Dispatch(
+                (options_.width + options_.thread_group[0] - 1)
+                    / options_.thread_group[0],
+                (options_.height + options_.thread_group[1] - 1)
+                    / options_.thread_group[1],
+                1);
+            ID3D11UnorderedAccessView* no_view = nullptr;
+            context_->CSSetUnorderedAccessViews(0, 1, &no_view, nullptr);
+        } else if (options_.depth_output) {
             context_->ClearDepthStencilView(
                 depth_view_.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
         } else {
             context_->ClearRenderTargetView(render_target_view_.Get(), clear);
         }
-        context_->PSSetShader(shader, nullptr, 0);
-        context_->Draw(3, 0);
+        if (options_.stage == ShaderStage::pixel) {
+            context_->PSSetShader(
+                candidate ? candidate_shader_.Get() : baseline_shader_.Get(),
+                nullptr,
+                0);
+            context_->Draw(3, 0);
+        }
         context_->CopyResource(
             staging_.Get(),
-            options_.depth_output
+            options_.stage == ShaderStage::compute
+                ? static_cast<ID3D11Resource*>(compute_target_.Get())
+                : options_.depth_output
                 ? static_cast<ID3D11Resource*>(depth_target_.Get())
                 : static_cast<ID3D11Resource*>(render_target_.Get()));
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map output");
-        const size_t components = options_.depth_output ? 1 : 4;
+        const size_t components = options_.output_components;
         std::vector<float> output(
             static_cast<size_t>(options_.width) * options_.height * components);
         const size_t row_size =
@@ -565,10 +631,16 @@ public:
         return output;
     }
 
-    ID3D11PixelShader* baseline_shader() const { return baseline_shader_.Get(); }
-    ID3D11PixelShader* candidate_shader() const { return candidate_shader_.Get(); }
-
 private:
+    DXGI_FORMAT output_format() const {
+        switch (options_.output_components) {
+        case 1: return DXGI_FORMAT_R32_FLOAT;
+        case 2: return DXGI_FORMAT_R32G32_FLOAT;
+        case 3: return DXGI_FORMAT_R32G32B32_FLOAT;
+        case 4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+        default: throw std::runtime_error("invalid output component count");
+        }
+    }
     void discover_adapter() {
         ComPtr<IDXGIDevice> dxgi_device;
         check(device_.As(&dxgi_device), "query IDXGIDevice");
@@ -659,20 +731,34 @@ private:
     }
 
     void create_pipeline() {
-        const auto vertex = read_binary(options_.vertex);
         const auto baseline = read_binary(options_.baseline);
         const auto candidate = read_binary(options_.candidate);
-        check(
-            device_->CreateVertexShader(vertex.data(), vertex.size(), nullptr, &vertex_shader_),
-            "CreateVertexShader");
-        check(
-            device_->CreatePixelShader(
-                baseline.data(), baseline.size(), nullptr, &baseline_shader_),
-            "CreatePixelShader baseline");
-        check(
-            device_->CreatePixelShader(
-                candidate.data(), candidate.size(), nullptr, &candidate_shader_),
-            "CreatePixelShader candidate");
+        if (options_.stage == ShaderStage::compute) {
+            check(
+                device_->CreateComputeShader(
+                    baseline.data(), baseline.size(), nullptr,
+                    &baseline_compute_shader_),
+                "CreateComputeShader baseline");
+            check(
+                device_->CreateComputeShader(
+                    candidate.data(), candidate.size(), nullptr,
+                    &candidate_compute_shader_),
+                "CreateComputeShader candidate");
+        } else {
+            const auto vertex = read_binary(options_.vertex);
+            check(
+                device_->CreateVertexShader(
+                    vertex.data(), vertex.size(), nullptr, &vertex_shader_),
+                "CreateVertexShader");
+            check(
+                device_->CreatePixelShader(
+                    baseline.data(), baseline.size(), nullptr, &baseline_shader_),
+                "CreatePixelShader baseline");
+            check(
+                device_->CreatePixelShader(
+                    candidate.data(), candidate.size(), nullptr, &candidate_shader_),
+                "CreatePixelShader candidate");
+        }
 
         for (const TextureBinding& binding : options_.textures) {
             inputs_.push_back(create_input_texture(binding));
@@ -683,7 +769,22 @@ private:
                 "CreateShaderResourceView");
             input_views_.push_back(std::move(view));
         }
-        if (options_.depth_output) {
+        if (options_.stage == ShaderStage::compute) {
+            compute_target_ = create_texture(
+                D3D11_USAGE_DEFAULT,
+                D3D11_BIND_UNORDERED_ACCESS,
+                0,
+                output_format());
+            staging_ = create_texture(
+                D3D11_USAGE_STAGING,
+                0,
+                D3D11_CPU_ACCESS_READ,
+                output_format());
+            check(
+                device_->CreateUnorderedAccessView(
+                    compute_target_.Get(), nullptr, &compute_view_),
+                "CreateUnorderedAccessView");
+        } else if (options_.depth_output) {
             depth_target_ = create_texture(
                 D3D11_USAGE_DEFAULT,
                 D3D11_BIND_DEPTH_STENCIL,
@@ -704,7 +805,7 @@ private:
             staging_ = create_texture(
                 D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ);
         }
-        if (!options_.depth_output) {
+        if (options_.stage == ShaderStage::pixel && !options_.depth_output) {
             check(
                 device_->CreateRenderTargetView(
                     render_target_.Get(), nullptr, &render_target_view_),
@@ -769,24 +870,35 @@ private:
         viewport.Height = static_cast<float>(options_.height);
         viewport.MaxDepth = 1.0f;
         ID3D11RenderTargetView* target = render_target_view_.Get();
-        context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
+        if (options_.stage == ShaderStage::pixel) {
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
+        }
         for (size_t index = 0; index < options_.constant_buffers.size(); ++index) {
             ID3D11Buffer* constant_buffer = constant_buffers_[index].Get();
             context_->VSSetConstantBuffers(
                 options_.constant_buffers[index].slot, 1, &constant_buffer);
             context_->PSSetConstantBuffers(
                 options_.constant_buffers[index].slot, 1, &constant_buffer);
+            context_->CSSetConstantBuffers(
+                options_.constant_buffers[index].slot, 1, &constant_buffer);
         }
         for (size_t index = 0; index < options_.textures.size(); ++index) {
             ID3D11ShaderResourceView* input_view = input_views_[index].Get();
             context_->PSSetShaderResources(
+                options_.textures[index].slot, 1, &input_view);
+            context_->CSSetShaderResources(
                 options_.textures[index].slot, 1, &input_view);
         }
         for (size_t index = 0; index < options_.samplers.size(); ++index) {
             ID3D11SamplerState* sampler = samplers_[index].Get();
             context_->PSSetSamplers(
                 options_.samplers[index].first, 1, &sampler);
+            context_->CSSetSamplers(
+                options_.samplers[index].first, 1, &sampler);
+        }
+        if (options_.stage == ShaderStage::compute) {
+            return;
         }
         context_->RSSetState(rasterizer_state_.Get());
         context_->RSSetViewports(1, &viewport);
@@ -806,13 +918,17 @@ private:
     ComPtr<ID3D11VertexShader> vertex_shader_;
     ComPtr<ID3D11PixelShader> baseline_shader_;
     ComPtr<ID3D11PixelShader> candidate_shader_;
+    ComPtr<ID3D11ComputeShader> baseline_compute_shader_;
+    ComPtr<ID3D11ComputeShader> candidate_compute_shader_;
     std::vector<ComPtr<ID3D11Resource>> inputs_;
     ComPtr<ID3D11Texture2D> render_target_;
     ComPtr<ID3D11Texture2D> depth_target_;
+    ComPtr<ID3D11Texture2D> compute_target_;
     ComPtr<ID3D11Texture2D> staging_;
     std::vector<ComPtr<ID3D11ShaderResourceView>> input_views_;
     ComPtr<ID3D11RenderTargetView> render_target_view_;
     ComPtr<ID3D11DepthStencilView> depth_view_;
+    ComPtr<ID3D11UnorderedAccessView> compute_view_;
     std::vector<ComPtr<ID3D11Buffer>> constant_buffers_;
     std::vector<ComPtr<ID3D11SamplerState>> samplers_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
@@ -1006,10 +1122,12 @@ void preserve_failure(
     const char* output_name = options.depth_output ? "depth.r32f" : "color.rgba32f";
     write_raw(options.failure_dir / ("baseline." + std::string(output_name)), baseline);
     write_raw(options.failure_dir / ("candidate." + std::string(output_name)), candidate);
-    std::filesystem::copy_file(
-        options.vertex,
-        options.failure_dir / "vertex.dxbc",
-        std::filesystem::copy_options::overwrite_existing);
+    if (options.stage == ShaderStage::pixel) {
+        std::filesystem::copy_file(
+            options.vertex,
+            options.failure_dir / "vertex.dxbc",
+            std::filesystem::copy_options::overwrite_existing);
+    }
     std::filesystem::copy_file(
         options.baseline,
         options.failure_dir / "baseline.dxbc",
@@ -1078,14 +1196,14 @@ int main(int argc, char** argv) {
                 runner.update_input(resource, inputs[resource]);
             }
             runner.update_constants(index);
-            const auto baseline = runner.render(runner.baseline_shader());
-            const auto candidate = runner.render(runner.candidate_shader());
+            const auto baseline = runner.render(false);
+            const auto candidate = runner.render(true);
             const Comparison comparison = compare_outputs(
                 baseline,
                 candidate,
                 options.absolute_tolerance,
                 options.relative_tolerance,
-                options.depth_output ? 1 : 4);
+                options.output_components);
             ++tested_cases;
             exact_values += comparison.exact_values;
             compared_values += comparison.compared_values;
@@ -1118,6 +1236,9 @@ int main(int argc, char** argv) {
                   << "  \"driver\": \"" << (options.warp ? "warp" : "hardware") << "\",\n"
                   << "  \"feature_level\": \""
                   << feature_level_name(runner.feature_level()) << "\",\n"
+                  << "  \"stage\": \""
+                  << (options.stage == ShaderStage::compute ? "compute" : "pixel")
+                  << "\",\n"
                   << "  \"seed\": " << options.seed << ",\n"
                   << "  \"requested_cases\": " << options.cases << ",\n"
                   << "  \"tested_cases\": " << tested_cases << ",\n"
@@ -1175,6 +1296,7 @@ int main(int argc, char** argv) {
         std::cout << "],\n"
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
+                  << "  \"output_components\": " << options.output_components << ",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
                   << "  \"exact_values\": " << exact_values << ",\n"
                   << "  \"max_absolute_error\": " << max_absolute_error << ",\n"
