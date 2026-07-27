@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -24,6 +24,29 @@ The feature blocks remain instruction ordered because packed voxel masks,
 probe-array addressing, ray steps and temporal confidence are DXBC-sensitive.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "gbufferAddressState", 1: "viewPositionState",
+    2: "normalDecodeState", 3: "materialResponseState",
+    4: "cascadeSelectionState", 5: "cascadeCoordinateState",
+    6: "voxelMaskState", 7: "voxelIteratorState",
+    8: "probeAddressState", 9: "probeWeightState",
+    10: "probeDiffuseState", 11: "probeOcclusionState",
+    12: "ssgiRayState", 13: "ssgiStepState",
+    14: "ssgiHitState", 15: "ssgiConfidenceState",
+    16: "ssrRayState", 17: "ssrStepState",
+    18: "ssrHitState", 19: "reflectionDirectionState",
+    20: "reflectionProbeState", 21: "reflectionBlendState",
+    22: "ambientOcclusionState", 23: "diffuseGiState",
+    24: "subsurfaceLayerZero", 25: "subsurfaceLayerOne",
+    26: "subsurfaceLayerTwo", 27: "subsurfaceLayerThree",
+    28: "subsurfaceWeightState", 29: "indirectAccumulator",
+    30: "aoAccumulator", 31: "subsurfaceAccumulator",
+    32: "indirectOutputState", 33: "indirectScratchA",
+    34: "indirectScratchB", 35: "indirectScratchC",
+    36: "indirectScratchD",
+}
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -150,7 +173,10 @@ def apply_indirect_light_recipe(
                 + "\n  }\n"
                 + source[insertion:]
             )
-        variants[selector] = source
+        variants[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="Probe, ray, and subsurface accumulation retain DXBC order.",
+        )
     return emit_validated_module(
         staging,
         shaders,
