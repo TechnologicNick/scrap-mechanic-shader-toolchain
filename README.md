@@ -276,6 +276,12 @@ diff checks as a raw edit. If both the raw and semantic representations of one
 selector are changed, the build stops and asks you to keep one representation
 authoritative. `--recompile-all` prefers semantic HLSL where it is available.
 
+`post_volumetric.hlsl` is emitted as one shared medium/high implementation. Its
+top-level shader uses structural helpers for quality selection, packed light
+colors, density sampling, HDR encoding, clustered mask traversal, and sphere
+volume integration. The contraction-sensitive cone march is isolated behind a
+typed clustered-light interface and retains its recovered operation order.
+
 The adjacent `rebuilt-shaders.sbc.build.json` classifies every selector. Edited
 branches also receive deterministic Microsoft assembly diffs under
 `rebuilt-shaders.sbc.diffs/`. An explicitly coordinated engine-side ABI change

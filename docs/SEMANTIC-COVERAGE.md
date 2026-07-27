@@ -50,13 +50,16 @@ The semantic corpus has two deliberate readability levels:
 
 - Fully structural implementations express algorithms with ordinary HLSL
   values, helpers, and control flow. This includes FXAA, godrays, volumetric
-  clouds, deferred composition, and the smaller post-processing, copy, GUI,
-  terrain, water, probe, and compute recipes.
+  clouds, clustered sphere-volumetric integration, deferred composition, and
+  the smaller post-processing, copy, GUI, terrain, water, probe, and compute
+  recipes. `post_volumetric` now shares one source for its medium/high modes;
+  its cone-light numerical kernel remains operation-ordered behind a typed
+  `IntegrateClusteredVolumetricLights` interface.
 - Instruction-ordered semantic implementations preserve the recovered
   arithmetic sequence but replace anonymous register state with stable domain
   names and document the algorithm phases. This applies to the largest or most
-  numerically sensitive families: volumetrics, SSGI cascade filtering, main
-  clutter/block/slant/voxel, character/asset/part materials, particles,
+  numerically sensitive families: cone-volumetric marching, SSGI cascade
+  filtering, main clutter/block/slant/voxel, character/asset/part materials, particles,
   deferred lighting, indirect cascade upscale, and indirect lighting.
 
 Both levels receive the same compile, reflection, and GPU comparison gates.
@@ -97,6 +100,12 @@ domain because independently compiled DXBC can differ in quad-lane and triangle
 edge ordering on larger synthetic targets. That domain still varies textures,
 constant buffers, samplers, structured inputs, branches, and arithmetic while
 removing undefined spatial ordering from the comparison.
+
+Pixel-stage structured buffers are bound independently from ordinary textures
+by the native runner. The volumetric campaign supplies coherent 17-word light
+mask records, sphere/cone constant records, packed UVs, cookie/shadow resources,
+and temporal inputs. Both quality permutations pass 256 deterministic cases
+with exact output equality after the structural lift.
 
 Advisory `D3D_SHADER_INPUT_BIND_DESC.Flags` are excluded from ABI equality
 because they describe compiler-observed component use, not runtime binding.
