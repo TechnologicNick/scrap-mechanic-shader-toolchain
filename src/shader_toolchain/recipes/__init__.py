@@ -8,6 +8,7 @@ from .copy_depth import apply_copy_depth_recipe
 from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
 from .post_blur import apply_post_blur_recipe
+from .post_downsample import apply_post_downsample_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 
@@ -23,6 +24,7 @@ RECIPES = (
     apply_blur_down_res_recipe,
     apply_bloom_downres_recipe,
     apply_bloom_upres_recipe,
+    apply_post_downsample_recipe,
 )
 
 
