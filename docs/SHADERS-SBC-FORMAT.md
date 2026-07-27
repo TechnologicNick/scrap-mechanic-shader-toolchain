@@ -145,3 +145,29 @@ the manifest preserves the complete mapping back to cache metadata and exact
 DXBC hashes. Normalization removes decompiler timestamps and repairs mechanical
 compute-signature defects using the authoritative DXBC thread-group declaration,
 making repeated runs byte-for-byte reproducible.
+
+## Cache serialization
+
+The reverse path uses the retained manifest as the authoritative table layout.
+It compiles every selector branch with Microsoft's `D3DCompile`, supplies the
+stage-appropriate Shader Model 5 profile, and orders the resulting bytecode by
+the original shader index. `D3DCompressShaders` creates a new BSCD bundle.
+
+The serializer retains all original shader and job keys, job mappings, resource
+IDs, stages, resource references, and descriptors. It replaces the BSCD bundle
+and its one-to-one indices, then emits a GenericCache version-1 header and a
+deterministic valid raw-LZ4 block. The current encoder uses one literal sequence:
+this is larger than fully compressed LZ4 but simple and deterministic.
+
+Before the temporary output is renamed, the tool parses it again and uses
+`D3DDecompressShaders` to recover all 4,141 bytecode programs:
+
+```powershell
+uv run sm-shaders build --jobs 32 output rebuilt-shaders.sbc
+```
+
+Because optimized DXBC cannot always be expressed as recompilable HLSL by the
+available decompilers, reconstruction also retains each exact DXBC blob. Normal
+build mode uses it only when `D3DCompile` rejects that branch; `--strict`
+disables this behavior. This hybrid is necessary for a complete cache until the
+remaining lift defects are repaired.
