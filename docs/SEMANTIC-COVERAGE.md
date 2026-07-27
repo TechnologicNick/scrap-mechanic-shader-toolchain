@@ -36,6 +36,14 @@ pass, independently verified 80 modules and 4,141 variants with corpus digest
 An audit of its 80 generated module files plus the shared include found no
 anonymous DXBC temporary identifier (`rN`) in `semantic/`.
 
+The shared-source architecture audit on the same date produced corpus digest
+`5f7ac74c8e99bd776cdc19c22a48a23b662c4e3d10771d63a6fde9d381ad8a56`.
+Ten multi-permutation families were emitted as selector-free shared HLSL, and
+all 80 modules received verified selector/definition sidecars. A forced
+32-worker semantic build compiled all 4,141 shaders with zero DXBC fallbacks;
+the resulting cache was 3,369,562 bytes with SHA-256
+`a92573b76996f9ea2544f9683e980aa9576401d7206f06d3f5b47930bc2b3c4c`.
+
 ## Readability levels
 
 The semantic corpus has two deliberate readability levels:
