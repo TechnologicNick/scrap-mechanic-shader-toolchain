@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,39 @@ shadow comparisons and long accumulation chains are contraction-sensitive.
 """
 
 
+REGISTER_NAMES = {
+    "r0": "pixelAndClusterState",
+    "r1": "viewRayAndDepthState",
+    "r2": "reprojectionState",
+    "r3": "temporalAndNoiseState",
+    "r4": "lightMaskIterator",
+    "r5": "marchPositionState",
+    "r6": "lightGeometryState",
+    "r7": "attenuationState",
+    "r8": "coneAndCookieState",
+    "r9": "shadowProjectionState",
+    "r10": "shadowFilterState",
+    "r11": "densityNoiseState",
+    "r12": "scatteringState",
+    "r13": "historyState",
+    "r14": "radianceAccumulator",
+    "r15": "integrationScratch",
+}
+
+
+def _name_volumetric_registers(source: str) -> str:
+    """Give the recovered register state stable roles without reordering it."""
+    for register, name in sorted(
+        REGISTER_NAMES.items(), key=lambda item: -len(item[0])
+    ):
+        source = re.sub(rf"\b{register}\b", name, source)
+    source = source.replace(
+        "  uint4 bitmask, uiDest;\n  float4 fDest;\n",
+        "  // The remaining state follows the original nested mask-walk order.\n",
+    )
+    return source
+
+
 def apply_post_volumetric_recipe(
     staging: Path,
     records: list[dict[str, Any]],
@@ -47,6 +81,10 @@ def apply_post_volumetric_recipe(
         selector: source.replace(
             "cb_arrCone[r4.w/4]._m", "cb_arrCone[r4.w].xClip._m"
         )
+        for selector, source in expanded.items()
+    }
+    expanded = {
+        selector: _name_volumetric_registers(source)
         for selector, source in expanded.items()
     }
     bodies = {
