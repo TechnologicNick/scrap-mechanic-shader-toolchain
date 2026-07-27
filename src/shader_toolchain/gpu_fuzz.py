@@ -106,6 +106,42 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_LINE_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float2 uv : TEXCOORD0;
+    float endFade : TEXCOORD1;
+    nointerpolation float fadeScale : TEXCOORD2;
+    nointerpolation float3 color : COLOR0;
+    noperspective centroid float3 screenUv : SCREEN_UV0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.uv = coordinates[vertexId];
+    output.endFade = coordinates[vertexId].x;
+    output.fadeScale = 0.625;
+    output.color = float3(0.25, 0.5, 0.75);
+    output.screenUv = float3(coordinates[vertexId], 0.5);
+    return output;
+}
+"""
+
 FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -298,6 +334,7 @@ VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
+    "fullscreen_line": FULLSCREEN_LINE_VERTEX,
     "fullscreen_clutter_impostor": FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX,
     "fullscreen_text": FULLSCREEN_TEXT_VERTEX,
     "fullscreen_billboard": FULLSCREEN_BILLBOARD_VERTEX,
