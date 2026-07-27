@@ -74,6 +74,19 @@ def verify_output(output: Path, expected_modules: int = 80) -> dict[str, Any]:
     ]
     if missing_selectors:
         errors.append(f"{len(missing_selectors)} shader selectors are missing")
+
+    bad_dxbc = []
+    for shader in shaders:
+        relative = shader.get("dxbc_path")
+        if relative is None:
+            continue
+        path = output / relative
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != shader.get(
+            "dxbc_sha256"
+        ):
+            bad_dxbc.append(relative)
+    if bad_dxbc:
+        errors.append(f"{len(bad_dxbc)} exact DXBC sidecars are missing or corrupt")
     if errors:
         raise ToolchainError("; ".join(errors))
 

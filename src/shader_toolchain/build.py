@@ -186,6 +186,22 @@ def build_cache(
         extracted = compiler.extract(validated_bundle, len(shaders))
         if metadata["shader_count"] != len(shaders) or len(extracted) != len(shaders):
             raise ToolchainError("rebuilt cache failed shader-count validation")
+        if metadata["jobs"] != manifest["jobs"]:
+            raise ToolchainError("rebuilt cache job table differs from the manifest")
+        if metadata["resource_ids"] != manifest["resource_ids"]:
+            raise ToolchainError("rebuilt cache resource IDs differ from the manifest")
+        compared_fields = (
+            "shader_key",
+            "bundle_index",
+            "stage_value",
+            "descriptor",
+            "resource_id_indices",
+        )
+        for actual, expected in zip(metadata["shaders"], shaders, strict=True):
+            if any(actual[field] != expected[field] for field in compared_fields):
+                raise ToolchainError(
+                    f"rebuilt metadata differs for shader {expected['index']}"
+                )
         temporary.replace(output)
     finally:
         if temporary.exists():

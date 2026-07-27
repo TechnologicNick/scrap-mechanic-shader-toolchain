@@ -1,4 +1,5 @@
 import json
+import hashlib
 
 import pytest
 
@@ -95,4 +96,33 @@ def test_verify_output_rejects_missing_selector(tmp_path) -> None:
     (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(ToolchainError, match="shader selectors are missing"):
+        verify_output(output, expected_modules=1)
+
+
+def test_verify_output_checks_exact_dxbc_sidecar(tmp_path) -> None:
+    output = tmp_path / "output"
+    (output / "hlsl").mkdir(parents=True)
+    (output / "dxbc").mkdir()
+    (output / "hlsl" / "example.hlsl").write_text(
+        "#if defined(SM_SHADER_A)\n#endif\n", encoding="utf-8"
+    )
+    bytecode = b"DXBC example"
+    (output / "dxbc" / "a.dxbc").write_bytes(bytecode)
+    manifest = {
+        "summary": {"module_count": 1, "shader_count": 1},
+        "shaders": [
+            {
+                "source_name": "example",
+                "selector": "SM_SHADER_A",
+                "dxbc_path": "dxbc/a.dxbc",
+                "dxbc_sha256": hashlib.sha256(bytecode).hexdigest(),
+            }
+        ],
+    }
+    (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    verify_output(output, expected_modules=1)
+    (output / "dxbc" / "a.dxbc").write_bytes(b"corrupt")
+
+    with pytest.raises(ToolchainError, match="DXBC sidecars are missing or corrupt"):
         verify_output(output, expected_modules=1)
