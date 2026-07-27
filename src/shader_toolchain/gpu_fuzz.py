@@ -426,6 +426,48 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_CLUTTER_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float2 uv : UV0;
+    nointerpolation float3 color : COLOR0;
+    float3 normal : NORMAL0;
+    float3 tangent : TANGENT0;
+    float3 bitangent : BITANGENT0;
+    float3 viewPosition : VIEW_POSITION0;
+    float occlusion : OCCLUSION0;
+    float filterValue : FILTER0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.uv = coordinates[vertexId];
+    output.color = float3(0.25, 0.5, 0.75);
+    output.normal = float3(0.0, 0.0, 1.0);
+    output.tangent = float3(1.0, 0.0, 0.0);
+    output.bitangent = float3(0.0, 1.0, 0.0);
+    output.viewPosition = float3(positions[vertexId], -10.0);
+    output.occlusion = 0.625;
+    output.filterValue = 0.5;
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "decals": DECALS_VERTEX,
@@ -439,6 +481,7 @@ VERTEX_HARNESSES = {
     "fullscreen_terrain": FULLSCREEN_TERRAIN_VERTEX,
     "fullscreen_editor_terrain": FULLSCREEN_EDITOR_TERRAIN_VERTEX,
     "fullscreen_slant": FULLSCREEN_SLANT_VERTEX,
+    "fullscreen_clutter": FULLSCREEN_CLUTTER_VERTEX,
 }
 
 

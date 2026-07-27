@@ -44,6 +44,7 @@ from .indirect_temporal import apply_indirect_temporal_recipe
 from .main_debug_drawer import apply_main_debug_drawer_recipe
 from .main_decals import apply_main_decals_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
+from .main_clutter import apply_main_clutter_recipe
 from .main_billboard import apply_main_billboard_recipe
 from .main_text import apply_main_text_recipe
 from .main_slant import apply_main_slant_recipe
@@ -112,6 +113,7 @@ RECIPES = (
     apply_main_debug_drawer_recipe,
     apply_main_decals_recipe,
     apply_main_clutter_impostor_recipe,
+    apply_main_clutter_recipe,
     apply_main_billboard_recipe,
     apply_main_text_recipe,
     apply_main_slant_recipe,
