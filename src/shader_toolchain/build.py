@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import difflib
 import json
 import os
 import re
@@ -12,8 +13,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
-from .hlsl import module_variants
+from .compare import compare_bytecodes, normalized_assembly
+from .hlsl import hlsl_token_sha256, module_variants
 from .reconstruct import ToolchainError, verify_output
+from .reflect import ShaderReflector
 from .sbc import D3DCompiler, lz4_compress_literals, parse_cache, parse_payload
 
 
@@ -29,6 +32,15 @@ def stable_diagnostic(message: str) -> str:
         if match:
             diagnostics.append(match.group(1))
     return "\n".join(diagnostics) or "D3DCompile failed without a diagnostic"
+
+
+def meaningfully_edited(shader: dict[str, Any], source: str) -> bool:
+    baseline = shader.get("hlsl_token_sha256")
+    if not baseline:
+        raise ToolchainError(
+            f"{shader['selector']} has no HLSL fingerprint; rerun sm-shaders reconstruct"
+        )
+    return hlsl_token_sha256(source) != baseline
 
 
 def serialize_payload(manifest: dict[str, Any], bundle: bytes) -> bytes:
@@ -85,72 +97,144 @@ def build_cache(
     corpus: Path,
     output: Path,
     *,
-    allow_dxbc_fallback: bool = True,
+    recompile_all: bool = False,
+    allow_dxbc_fallback: bool = False,
+    allow_interface_changes: bool = False,
     jobs: int | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """Compile a reconstructed corpus and atomically write a validated cache."""
-    if output.exists():
-        raise ToolchainError(f"output path already exists: {output}")
+    """Losslessly rebuild a corpus, compiling only meaningfully edited branches."""
+    report_path = output.with_suffix(output.suffix + ".build.json")
+    diff_path = output.with_suffix(output.suffix + ".diffs")
+    for target in (output, report_path, diff_path):
+        if target.exists():
+            raise ToolchainError(f"output path already exists: {target}")
+    if allow_dxbc_fallback and not recompile_all:
+        raise ToolchainError("--allow-dxbc-fallback requires --recompile-all")
     verify_output(corpus)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("corpus_format_version") != 2:
+        raise ToolchainError(
+            "corpus has no v2 HLSL fingerprints; rerun sm-shaders reconstruct"
+        )
     shaders = manifest["shaders"]
     modules: dict[str, dict[str, str]] = {}
     for source_name in {shader["source_name"] for shader in shaders}:
         path = corpus / "hlsl" / f"{source_name}.hlsl"
         modules[source_name] = module_variants(path.read_text(encoding="utf-8"))
 
-    worker_count = jobs if jobs is not None else (os.cpu_count() or 1)
-    if worker_count < 1:
+    requested_workers = jobs if jobs is not None else (os.cpu_count() or 1)
+    if requested_workers < 1:
         raise ToolchainError("worker count must be at least one")
-    worker_count = min(worker_count, len(shaders))
     thread_state = threading.local()
     bytecodes: list[bytes | None] = [None] * len(shaders)
-    fallbacks: list[dict[str, str]] = []
+    build_records: list[dict[str, Any] | None] = [None] * len(shaders)
+    compile_tasks: list[tuple[int, dict[str, Any], str, bytes, str]] = []
 
-    def compile_one(index: int, shader: dict[str, Any]) -> tuple[int, bytes, dict[str, str] | None]:
-        profile = PROFILES.get(shader["stage"])
-        if profile is None:
-            raise ToolchainError(f"unsupported shader stage: {shader['stage']}")
+    for index, shader in enumerate(shaders):
         selector = shader["selector"]
         try:
             source = modules[shader["source_name"]][selector]
         except KeyError as error:
             raise ToolchainError(f"missing HLSL branch {selector}") from error
+        current_fingerprint = hlsl_token_sha256(source)
+        exact_path = corpus / shader["dxbc_path"]
+        exact_bytecode = exact_path.read_bytes()
+        if not recompile_all and not meaningfully_edited(shader, source):
+            bytecodes[index] = exact_bytecode
+            build_records[index] = {
+                "selector": selector,
+                "mode": "unchanged-exact",
+                "hlsl_token_sha256": current_fingerprint,
+                "assembly_exact": True,
+                "abi_compatible": True,
+            }
+        else:
+            compile_tasks.append(
+                (index, shader, source, exact_bytecode, current_fingerprint)
+            )
+
+    worker_count = min(requested_workers, len(compile_tasks)) if compile_tasks else 0
+
+    def compile_one(
+        index: int,
+        shader: dict[str, Any],
+        source: str,
+        exact_bytecode: bytes,
+        current_fingerprint: str,
+    ) -> tuple[int, bytes, dict[str, Any], str | None]:
+        profile = PROFILES.get(shader["stage"])
+        if profile is None:
+            raise ToolchainError(f"unsupported shader stage: {shader['stage']}")
+        selector = shader["selector"]
         compiler = getattr(thread_state, "compiler", None)
         if compiler is None:
             compiler = D3DCompiler()
             thread_state.compiler = compiler
+            thread_state.reflector = ShaderReflector()
         try:
             bytecode = compiler.compile(source, shader["entry_point"], profile)
         except RuntimeError as error:
-            fallback_path = corpus / shader.get("dxbc_path", "")
-            if not allow_dxbc_fallback or not fallback_path.is_file():
+            if not recompile_all or not allow_dxbc_fallback:
                 raise ToolchainError(f"{selector}: {error}") from error
-            bytecode = fallback_path.read_bytes()
-            return index, bytecode, {
+            return index, exact_bytecode, {
                 "selector": selector,
+                "mode": "recompile-fallback",
+                "hlsl_token_sha256": current_fingerprint,
                 "error": stable_diagnostic(str(error)),
-            }
-        return index, bytecode, None
+                "assembly_exact": True,
+                "abi_compatible": True,
+            }, None
 
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [
-            executor.submit(compile_one, index, shader)
-            for index, shader in enumerate(shaders)
-        ]
-        for completed, future in enumerate(as_completed(futures), start=1):
-            index, bytecode, fallback = future.result()
-            bytecodes[index] = bytecode
-            if fallback:
-                fallbacks.append(fallback)
-            if progress and (completed % 100 == 0 or completed == len(shaders)):
-                progress(completed, len(shaders))
+        comparison, baseline_assembly, candidate_assembly = compare_bytecodes(
+            exact_bytecode, bytecode, compiler, thread_state.reflector
+        )
+        if not comparison["abi_compatible"] and not allow_interface_changes:
+            changed = ", ".join(comparison["abi_differences"])
+            raise ToolchainError(
+                f"{selector}: edited shader changes runtime ABI sections: {changed}"
+            )
+        mode = "research-compiled" if recompile_all else "edited-compiled"
+        record = {
+            "selector": selector,
+            "mode": mode,
+            "hlsl_token_sha256": current_fingerprint,
+            **comparison,
+        }
+        difference = None
+        if not recompile_all and not comparison["assembly_exact"]:
+            difference = "\n".join(
+                difflib.unified_diff(
+                    baseline_assembly.splitlines(),
+                    candidate_assembly.splitlines(),
+                    fromfile="baseline",
+                    tofile="candidate",
+                    lineterm="",
+                )
+            ) + "\n"
+        return index, bytecode, record, difference
+
+    assembly_diffs: dict[str, str] = {}
+    if compile_tasks:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(compile_one, *task) for task in compile_tasks]
+            for completed, future in enumerate(as_completed(futures), start=1):
+                index, bytecode, record, difference = future.result()
+                bytecodes[index] = bytecode
+                build_records[index] = record
+                if difference:
+                    assembly_diffs[record["selector"]] = difference
+                if progress and (
+                    completed % 100 == 0 or completed == len(compile_tasks)
+                ):
+                    progress(completed, len(compile_tasks))
 
     compiled_bytecodes = [bytecode for bytecode in bytecodes if bytecode is not None]
     if len(compiled_bytecodes) != len(shaders):
         raise ToolchainError("one or more shader compilation results are missing")
-    fallbacks.sort(key=lambda item: item["selector"])
+    completed_records = [record for record in build_records if record is not None]
+    if len(completed_records) != len(shaders):
+        raise ToolchainError("one or more shader build records are missing")
 
     compiler = D3DCompiler()
     bundle = compiler.compress(compiled_bytecodes)
@@ -182,25 +266,50 @@ def build_cache(
                 raise ToolchainError(
                     f"rebuilt metadata differs for shader {expected['index']}"
                 )
+        for index, record in enumerate(completed_records):
+            if record["mode"] == "unchanged-exact" and normalized_assembly(
+                extracted[index], compiler
+            ) != normalized_assembly(compiled_bytecodes[index], compiler):
+                raise ToolchainError(
+                    f"{record['selector']}: lossless assembly validation failed"
+                )
         temporary.replace(output)
     finally:
         if temporary.exists():
             temporary.unlink()
 
+    mode_counts = {
+        mode: sum(record["mode"] == mode for record in completed_records)
+        for mode in sorted({record["mode"] for record in completed_records})
+    }
     summary = {
         **header,
-        "compiled_count": len(shaders) - len(fallbacks),
-        "fallback_count": len(fallbacks),
+        "modes": mode_counts,
+        "compiled_count": sum(
+            record["mode"] in ("edited-compiled", "research-compiled")
+            for record in completed_records
+        ),
+        "fallback_count": mode_counts.get("recompile-fallback", 0),
+        "unchanged_exact_count": mode_counts.get("unchanged-exact", 0),
         "shader_count": len(shaders),
         "bundle_size": len(bundle),
         "jobs": worker_count,
         "output_sha256": hashlib.sha256(cache_data).hexdigest(),
     }
-    report_path = output.with_suffix(output.suffix + ".build.json")
-    report = {"summary": summary, "fallbacks": fallbacks}
+    report = {"summary": summary, "shaders": completed_records}
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
-    return {**summary, "report": report_path.name}
+    if assembly_diffs:
+        diff_path.mkdir(parents=True, exist_ok=False)
+        for selector, difference in sorted(assembly_diffs.items()):
+            (diff_path / f"{selector}.diff").write_text(
+                difference, encoding="utf-8", newline="\n"
+            )
+    return {
+        **summary,
+        "report": report_path.name,
+        "diff_directory": diff_path.name if assembly_diffs else None,
+    }

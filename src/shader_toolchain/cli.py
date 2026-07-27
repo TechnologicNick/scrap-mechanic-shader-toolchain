@@ -39,9 +39,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="parallel compiler workers (default: all logical CPUs)",
     )
     build_parser.add_argument(
+        "--recompile-all",
+        action="store_true",
+        help="research mode: send unchanged branches through D3DCompile too",
+    )
+    build_parser.add_argument(
+        "--allow-dxbc-fallback",
+        action="store_true",
+        help="with --recompile-all, use exact DXBC when compilation fails",
+    )
+    build_parser.add_argument(
+        "--allow-interface-changes",
+        action="store_true",
+        help="allow edited shaders to change reflected runtime ABI",
+    )
+    build_parser.add_argument(
         "--strict",
         action="store_true",
-        help="fail instead of using exact recovered DXBC when a lift does not compile",
+        help="deprecated alias for --recompile-all",
     )
     compare_parser = commands.add_parser(
         "compare", help="compare shader assembly and runtime ABI between two caches"
@@ -72,7 +87,9 @@ def main() -> int:
             summary = build_cache(
                 args.corpus,
                 args.output,
-                allow_dxbc_fallback=not args.strict,
+                recompile_all=args.recompile_all or args.strict,
+                allow_dxbc_fallback=args.allow_dxbc_fallback,
+                allow_interface_changes=args.allow_interface_changes,
                 jobs=args.jobs,
                 progress=lambda completed, total: print(
                     f"compiled {completed}/{total}", file=sys.stderr

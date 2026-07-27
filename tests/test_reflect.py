@@ -38,3 +38,44 @@ def test_abi_differences_names_changed_sections() -> None:
     }
     candidate = {**baseline, "thread_group": [8, 8, 1]}
     assert abi_differences(baseline, candidate) == ["thread_group"]
+
+
+def test_reflection_ignores_resource_and_variable_names() -> None:
+    compiler = D3DCompiler()
+    reflector = ShaderReflector()
+    first = compiler.compile(
+        "cbuffer First : register(b2) { float4 firstValue; }; "
+        "float4 mainPS() : SV_Target { return firstValue; }",
+        "mainPS",
+        "ps_5_0",
+    )
+    second = compiler.compile(
+        "cbuffer Second : register(b2) { float4 secondValue; }; "
+        "float4 mainPS() : SV_Target { return secondValue; }",
+        "mainPS",
+        "ps_5_0",
+    )
+    assert abi_differences(reflector.abi(first), reflector.abi(second)) == []
+
+
+def test_reflection_detects_binding_and_thread_group_changes() -> None:
+    compiler = D3DCompiler()
+    reflector = ShaderReflector()
+    first = compiler.compile(
+        "RWByteAddressBuffer output : register(u0); "
+        "[numthreads(8, 8, 1)] void mainCS(uint3 id : SV_DispatchThreadID) "
+        "{ output.Store(id.x, id.y); }",
+        "mainCS",
+        "cs_5_0",
+    )
+    second = compiler.compile(
+        "RWByteAddressBuffer output : register(u1); "
+        "[numthreads(16, 8, 1)] void mainCS(uint3 id : SV_DispatchThreadID) "
+        "{ output.Store(id.x, id.y); }",
+        "mainCS",
+        "cs_5_0",
+    )
+    assert abi_differences(reflector.abi(first), reflector.abi(second)) == [
+        "resources",
+        "thread_group",
+    ]
