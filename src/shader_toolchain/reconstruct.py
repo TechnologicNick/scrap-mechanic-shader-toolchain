@@ -277,6 +277,7 @@ def reconstruct(
                     "dxbc_sha256": hashlib.sha256(
                         blobs[shader["bundle_index"]]
                     ).hexdigest(),
+                    "dxbc_path": f"dxbc/{shader['shader_key'][2:]}.dxbc",
                     "resource_id_indices": shader["resource_id_indices"],
                 }
             )
@@ -286,6 +287,12 @@ def reconstruct(
         staging = work / "result"
         hlsl_dir = staging / "hlsl"
         hlsl_dir.mkdir(parents=True)
+        exact_dxbc_dir = staging / "dxbc"
+        exact_dxbc_dir.mkdir()
+        for record in records:
+            (staging / record["dxbc_path"]).write_bytes(
+                blobs[record["bundle_index"]]
+            )
         for source_name in sorted(modules):
             variants = sorted(modules[source_name], key=lambda item: item["shader_key"])
             (hlsl_dir / f"{source_name}.hlsl").write_text(

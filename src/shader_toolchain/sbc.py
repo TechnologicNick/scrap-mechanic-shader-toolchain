@@ -98,6 +98,20 @@ def lz4_decompress_block(source: bytes, expected_size: int) -> bytes:
     return bytes(output)
 
 
+def lz4_compress_literals(source: bytes) -> bytes:
+    """Encode a deterministic raw-LZ4 block using a single literal sequence."""
+    length = len(source)
+    output = bytearray((min(length, 15) << 4,))
+    if length >= 15:
+        remainder = length - 15
+        while remainder >= 255:
+            output.append(255)
+            remainder -= 255
+        output.append(remainder)
+    output.extend(source)
+    return bytes(output)
+
+
 def parse_cache(path: Path) -> tuple[dict[str, Any], bytes]:
     file_data = path.read_bytes()
     reader = Reader(file_data)
@@ -214,6 +228,29 @@ class D3DCompiler:
             ctypes.POINTER(ctypes.c_void_p),
         ]
         self.disassemble.restype = ctypes.c_long
+        self.compile_shader = self.dll.D3DCompile
+        self.compile_shader.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        self.compile_shader.restype = ctypes.c_long
+        self.compress_shaders = self.dll.D3DCompressShaders
+        self.compress_shaders.argtypes = [
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        self.compress_shaders.restype = ctypes.c_long
 
     @staticmethod
     def _blob_bytes(blob: int) -> bytes:
@@ -261,6 +298,68 @@ class D3DCompiler:
             return self._blob_bytes(blob.value)
         finally:
             self._release(blob.value)
+
+    def compile(self, source: str, entry_point: str, profile: str) -> bytes:
+        encoded = source.encode("utf-8")
+        source_buffer = ctypes.create_string_buffer(encoded)
+        bytecode = ctypes.c_void_p()
+        errors = ctypes.c_void_p()
+        result = self.compile_shader(
+            source_buffer,
+            len(encoded),
+            b"reconstructed.hlsl",
+            None,
+            None,
+            entry_point.encode("ascii"),
+            profile.encode("ascii"),
+            1 << 11,
+            0,
+            ctypes.byref(bytecode),
+            ctypes.byref(errors),
+        )
+        message = ""
+        if errors.value:
+            try:
+                message = self._blob_bytes(errors.value).decode(
+                    "utf-8", errors="replace"
+                )
+            finally:
+                self._release(errors.value)
+        if result < 0:
+            raise RuntimeError(
+                f"D3DCompile failed with HRESULT 0x{result & 0xffffffff:08x}: {message.strip()}"
+            )
+        try:
+            return self._blob_bytes(bytecode.value)
+        finally:
+            self._release(bytecode.value)
+
+    def compress(self, shaders: list[bytes]) -> bytes:
+        class ShaderData(ctypes.Structure):
+            _fields_ = [
+                ("bytecode", ctypes.c_void_p),
+                ("bytecode_length", ctypes.c_size_t),
+            ]
+
+        buffers = [ctypes.create_string_buffer(shader) for shader in shaders]
+        entries = (ShaderData * len(shaders))(
+            *[
+                ShaderData(ctypes.cast(buffer, ctypes.c_void_p), len(shader))
+                for buffer, shader in zip(buffers, shaders, strict=True)
+            ]
+        )
+        bundle = ctypes.c_void_p()
+        result = self.compress_shaders(
+            len(shaders), ctypes.byref(entries), 1, ctypes.byref(bundle)
+        )
+        if result < 0:
+            raise RuntimeError(
+                f"D3DCompressShaders failed with HRESULT 0x{result & 0xffffffff:08x}"
+            )
+        try:
+            return self._blob_bytes(bundle.value)
+        finally:
+            self._release(bundle.value)
 
 
 def safe_stem(shader: dict[str, Any]) -> str:
