@@ -510,6 +510,58 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_CHARACTER_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float3 viewPosition : VIEW_POSITION0;
+    float4 uv0 : UV0;
+    float4 uv1 : UV1;
+    float3 normal : NORMAL0;
+    float3 tangent : TANGENT0;
+    float3 bitangent : BITANGENT0;
+    float3 objectTangent : OBJECT_TANGENT0;
+    float4 color : VERTEXCOLOR0;
+    noperspective float3 screenUv : SCREEN_UV0;
+    float4 fogColor : FOG_COLOR0;
+    float4 occlusion : OCCLUSION0;
+    float4 planeViewPosition : PLANE_VIEW_POS0;
+    float3 laserOffset : LASER_OFFSET0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.viewPosition = float3(positions[vertexId], -10.0);
+    output.uv0 = float4(coordinates[vertexId], 0.25, 0.75);
+    output.uv1 = float4(coordinates[vertexId] * 0.5, 0.375, 0.625);
+    output.normal = float3(0.0, 0.0, 1.0);
+    output.tangent = float3(1.0, 0.0, 0.0);
+    output.bitangent = float3(0.0, 1.0, 0.0);
+    output.objectTangent = float3(1.0, 0.0, 0.0);
+    output.color = float4(0.25, 0.5, 0.75, 0.625);
+    output.screenUv = float3(coordinates[vertexId], 0.5);
+    output.fogColor = float4(0.05, 0.1, 0.15, 0.25);
+    output.occlusion = float4(0.25, 0.5, 0.625, 0.75);
+    output.planeViewPosition = float4(positions[vertexId], -10.0, 1.0);
+    output.laserOffset = float3(0.0, 0.0, 0.125);
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "decals": DECALS_VERTEX,
@@ -525,6 +577,7 @@ VERTEX_HARNESSES = {
     "fullscreen_slant": FULLSCREEN_SLANT_VERTEX,
     "fullscreen_clutter": FULLSCREEN_CLUTTER_VERTEX,
     "fullscreen_block": FULLSCREEN_BLOCK_VERTEX,
+    "fullscreen_character": FULLSCREEN_CHARACTER_VERTEX,
 }
 
 
@@ -788,6 +841,12 @@ def fuzz_semantic_shader(
         vertex, shader = select_shader_pair(manifest, source_name, pixel_selector)
         shader_stage = "pixel"
     execution = shader.get("semantic_execution", {})
+    absolute_tolerance = float(
+        execution.get("absolute_tolerance", absolute_tolerance)
+    )
+    relative_tolerance = float(
+        execution.get("relative_tolerance", relative_tolerance)
+    )
     ulp_tolerance = int(execution.get("ulp_tolerance", ulp_tolerance))
     width = int(execution.get("width", width))
     height = int(execution.get("height", height))
@@ -1079,6 +1138,8 @@ def fuzz_semantic_shader(
             "dispatch_width": dispatch_width,
             "dispatch_height": dispatch_height,
             "ulp_tolerance": ulp_tolerance,
+            "absolute_tolerance": absolute_tolerance,
+            "relative_tolerance": relative_tolerance,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),

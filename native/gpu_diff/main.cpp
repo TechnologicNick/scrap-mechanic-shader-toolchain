@@ -592,10 +592,6 @@ Options parse_options(int argc, char** argv) {
     if (options.width > 4096 || options.height > 4096) {
         throw std::runtime_error("texture dimensions must not exceed 4096");
     }
-    if (options.textures.empty() && options.structured_inputs.empty()
-        && options.structured_outputs.empty()) {
-        throw std::runtime_error("at least one shader input is required");
-    }
     if (std::any_of(
             options.textures.begin(), options.textures.end(),
             [](const TextureBinding& texture) {
