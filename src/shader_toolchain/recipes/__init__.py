@@ -54,6 +54,7 @@ from .main_block import apply_main_block_recipe
 from .main_asset import apply_main_asset_recipe
 from .main_character import apply_main_character_recipe
 from .main_particles import apply_main_particles_recipe
+from .main_part import apply_main_part_recipe
 from .main_voxel_terrain import apply_main_voxel_terrain_recipe
 from .main_light import apply_main_light_recipe
 from .main_text import apply_main_text_recipe
@@ -132,6 +133,7 @@ RECIPES = (
     apply_main_asset_recipe,
     apply_main_character_recipe,
     apply_main_particles_recipe,
+    apply_main_part_recipe,
     apply_main_voxel_terrain_recipe,
     apply_main_light_recipe,
     apply_main_text_recipe,

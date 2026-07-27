@@ -138,6 +138,37 @@ def apply_character_material_recipe(
         source = re.sub(
             r"(cbuffer\s+\w+)\s*:\s*register\(b[012]\)", r"\1", source
         )
+        # Recover vector lanes that 3Dmigoto rendered as scalar broadcasts.
+        source = re.sub(
+            r"(o\d+\.xy)\s*=\s*cb_offset\.fSpecular;",
+            r"\1 = float2(cb_offset.fSpecular, cb_offset.fGloss);", source,
+        )
+        source = re.sub(
+            r"saturate\(cb_laser\.fInvFarDist \* (r\d+\.zw)\)",
+            r"saturate(float2(cb_laser.fInvFarDist, "
+            r"cb_laser.fInvNearDist) * \1)", source,
+        )
+        # Some vertex lifts address two separately declared output semantics
+        # through their original packed oN register. Recreate each declaration
+        # from the corresponding lanes before recompilation.
+        packed_output_scalars = re.findall(
+            r"float3\s+o(\d+)\s*:\s*\w+\d*,\s*\n\s*"
+            r"out float\s+p\1\s*:\s*\w+\d*", source,
+        )
+        for register in packed_output_scalars:
+            source = re.sub(
+                rf"o{register}\.xyzw\s*=\s*(\w+)\.xyzw;",
+                rf"o{register}.xyz = \1.xyz; p{register} = \1.w;", source,
+            )
+        packed_output_vectors = re.findall(
+            r"float2\s+o(\d+)\s*:\s*\w+\d*,\s*\n\s*"
+            r"out float2\s+p\1\s*:\s*\w+\d*", source,
+        )
+        for register in packed_output_vectors:
+            source = re.sub(
+                rf"o{register}\.xyzw\s*=\s*(\w+)\.xyzw;",
+                rf"o{register}.xy = \1.xy; p{register}.xy = \1.zw;", source,
+            )
         # 3Dmigoto names separately declared semantics sharing one input
         # register as vN/wN, but leaves several instructions addressed through
         # the packed register. Rebuild the upper-lane UV1 value explicitly.
