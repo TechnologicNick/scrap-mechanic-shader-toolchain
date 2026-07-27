@@ -40,6 +40,33 @@ def test_abi_differences_names_changed_sections() -> None:
     assert abi_differences(baseline, candidate) == ["thread_group"]
 
 
+def test_abi_comparison_uses_effective_signature_components() -> None:
+    signature = {
+        "semantic": "TEXCOORD",
+        "index": 4,
+        "system_value": 0,
+        "component_type": 1,
+        "mask": 8,
+        "read_write_mask": 8,
+        "stream": 0,
+        "min_precision": 0,
+    }
+    baseline = {
+        "version": 1,
+        "inputs": [signature],
+        "outputs": [{**signature, "read_write_mask": 7}],
+        "resources": [],
+        "constant_buffers": [],
+        "thread_group": [0, 0, 0],
+    }
+    candidate = {
+        **baseline,
+        "inputs": [{**signature, "mask": 15}],
+        "outputs": [{**signature, "mask": 15, "read_write_mask": 7}],
+    }
+    assert abi_differences(baseline, candidate) == []
+
+
 def test_reflection_ignores_resource_and_variable_names() -> None:
     compiler = D3DCompiler()
     reflector = ShaderReflector()

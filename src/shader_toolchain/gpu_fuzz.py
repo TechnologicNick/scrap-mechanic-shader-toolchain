@@ -106,10 +106,47 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float depthFade : TEXCOORD0;
+    float3 viewNormal : TEXCOORD1;
+    float4 texcoord : TEXCOORD2;
+    nointerpolation float4 tint : TEXCOORD3;
+    nointerpolation uint4 slice : TEXCOORD4;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.depthFade = 0.625;
+    output.viewNormal = normalize(float3(0.35, 0.8, 0.48));
+    output.texcoord = float4(coordinates[vertexId], 0.0, 0.0);
+    output.tint = float4(0.25, 0.5, 0.75, asfloat(0u));
+    output.slice.w = 0;
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
+    "fullscreen_clutter_impostor": FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX,
 }
 
 

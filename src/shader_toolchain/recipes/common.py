@@ -120,7 +120,8 @@ def emit_validated_module(
         if not comparison["abi_compatible"]:
             changed = ", ".join(comparison["abi_differences"])
             raise RuntimeError(
-                f"{recipe_name} semantic recipe changes runtime ABI: {changed}"
+                f"{recipe_name} {shader['selector']} semantic recipe changes "
+                f"runtime ABI: {changed}"
             )
         assembly_exact += int(comparison["assembly_exact"])
         shader.update(

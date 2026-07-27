@@ -321,6 +321,20 @@ class ShaderReflector:
 
 
 def abi_differences(baseline: dict[str, Any], candidate: dict[str, Any]) -> list[str]:
+    def effective_signatures(
+        signatures: list[dict[str, Any]], *, outputs: bool
+    ) -> list[dict[str, Any]]:
+        normalized = []
+        for signature in signatures:
+            item = dict(signature)
+            if outputs:
+                item["mask"] &= ~item["read_write_mask"] & 0xF
+            else:
+                item["mask"] = item["read_write_mask"]
+            item.pop("read_write_mask")
+            normalized.append(item)
+        return normalized
+
     differences = []
     for field in (
         "version",
@@ -330,6 +344,14 @@ def abi_differences(baseline: dict[str, Any], candidate: dict[str, Any]) -> list
         "constant_buffers",
         "thread_group",
     ):
-        if baseline[field] != candidate[field]:
+        baseline_value = baseline[field]
+        candidate_value = candidate[field]
+        if field == "inputs":
+            baseline_value = effective_signatures(baseline_value, outputs=False)
+            candidate_value = effective_signatures(candidate_value, outputs=False)
+        elif field == "outputs":
+            baseline_value = effective_signatures(baseline_value, outputs=True)
+            candidate_value = effective_signatures(candidate_value, outputs=True)
+        if baseline_value != candidate_value:
             differences.append(field)
     return differences
