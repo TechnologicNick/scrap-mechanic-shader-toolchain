@@ -212,6 +212,8 @@ def _invoke_harness(
     seed: int,
     width: int,
     height: int,
+    dispatch_width: int,
+    dispatch_height: int,
     absolute_tolerance: float,
     relative_tolerance: float,
     texture_slots: list[int],
@@ -245,6 +247,10 @@ def _invoke_harness(
         str(width),
         "--height",
         str(height),
+        "--dispatch-width",
+        str(dispatch_width),
+        "--dispatch-height",
+        str(dispatch_height),
         "--absolute-tolerance",
         str(absolute_tolerance),
         "--relative-tolerance",
@@ -339,6 +345,10 @@ def fuzz_semantic_shader(
     execution = shader.get("semantic_execution", {})
     width = int(execution.get("width", width))
     height = int(execution.get("height", height))
+    dispatch_width = int(execution.get("dispatch_width", width))
+    dispatch_height = int(execution.get("dispatch_height", height))
+    if dispatch_width < 1 or dispatch_height < 1:
+        raise ToolchainError("dispatch dimensions must be positive")
     texture_slots = [
         int(slot)
         for slot in execution.get(
@@ -466,6 +476,8 @@ def fuzz_semantic_shader(
             seed=seed,
             width=width,
             height=height,
+            dispatch_width=dispatch_width,
+            dispatch_height=dispatch_height,
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
             texture_slots=texture_slots,
@@ -494,6 +506,8 @@ def fuzz_semantic_shader(
             seed=seed,
             width=width,
             height=height,
+            dispatch_width=dispatch_width,
+            dispatch_height=dispatch_height,
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
             texture_slots=texture_slots,
@@ -529,6 +543,8 @@ def fuzz_semantic_shader(
             "output_components": output_components,
             "output_targets": output_targets,
             "thread_group": thread_group,
+            "dispatch_width": dispatch_width,
+            "dispatch_height": dispatch_height,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),

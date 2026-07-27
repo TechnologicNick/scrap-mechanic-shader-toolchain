@@ -65,6 +65,8 @@ struct Options {
     std::filesystem::path failure_dir;
     uint32_t width = 64;
     uint32_t height = 64;
+    uint32_t dispatch_width = 0;
+    uint32_t dispatch_height = 0;
     uint32_t cases = 256;
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
@@ -231,6 +233,10 @@ Options parse_options(int argc, char** argv) {
             options.width = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--height") {
             options.height = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--dispatch-width") {
+            options.dispatch_width = static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--dispatch-height") {
+            options.dispatch_height = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--cases") {
             options.cases = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--seed") {
@@ -384,6 +390,8 @@ Options parse_options(int argc, char** argv) {
     if (options.width == 0 || options.height == 0 || options.cases == 0) {
         throw std::runtime_error("width, height, and cases must be positive");
     }
+    if (options.dispatch_width == 0) options.dispatch_width = options.width;
+    if (options.dispatch_height == 0) options.dispatch_height = options.height;
     if (options.output_components == 0 || options.output_components > 4
         || options.output_targets == 0 || options.output_targets > 8
         || std::any_of(
@@ -667,9 +675,9 @@ public:
                 nullptr,
                 0);
             context_->Dispatch(
-                (options_.width + options_.thread_group[0] - 1)
+                (options_.dispatch_width + options_.thread_group[0] - 1)
                     / options_.thread_group[0],
-                (options_.height + options_.thread_group[1] - 1)
+                (options_.dispatch_height + options_.thread_group[1] - 1)
                     / options_.thread_group[1],
                 1);
             std::vector<ID3D11UnorderedAccessView*> no_views(views.size(), nullptr);
@@ -1461,6 +1469,8 @@ int main(int argc, char** argv) {
                   << "  \"tested_cases\": " << tested_cases << ",\n"
                   << "  \"width\": " << options.width << ",\n"
                   << "  \"height\": " << options.height << ",\n"
+                  << "  \"dispatch_width\": " << options.dispatch_width << ",\n"
+                  << "  \"dispatch_height\": " << options.dispatch_height << ",\n"
                   << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
                   << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
                   << "  \"texture_slots\": [";

@@ -9,6 +9,7 @@ from .cmp_water_normal import apply_cmp_water_normal_recipe
 from .cmp_water_init_spectrum import apply_cmp_water_init_spectrum_recipe
 from .cmp_cluster_to_volumetrics import apply_cmp_cluster_to_volumetrics_recipe
 from .cmp_fft_butterfly_shared import apply_cmp_fft_butterfly_shared_recipe
+from .cmp_normal_mips import apply_cmp_normal_mips_recipe
 from .copy_auto_hdr import apply_copy_auto_hdr_recipe
 from .blur_down_res import apply_blur_down_res_recipe
 from .blur_pushmap_a import apply_blur_pushmap_a_recipe
@@ -85,6 +86,7 @@ RECIPES = (
     apply_cube_map_face_composition_recipe,
     apply_post_sky_recipe,
     apply_ssgi_prepass_recipe,
+    apply_cmp_normal_mips_recipe,
 )
 
 
