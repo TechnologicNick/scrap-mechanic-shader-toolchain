@@ -14,9 +14,40 @@ from .reconstruct import ToolchainError, repository_root, verify_output
 from .sbc import D3DCompiler
 
 
+FULLSCREEN_UV_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float4 uv : UV0;
+    float4 unscaledUv : UNSCALED_UV0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.uv = float4(coordinates[vertexId], 0.0, 0.0);
+    output.unscaledUv = output.uv;
+    return output;
+}
+"""
+
+
 def select_shader_pair(
     manifest: dict[str, Any], source_name: str, pixel_selector: str | None = None
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the single semantic pixel shader and matching exact vertex shader."""
     shaders = [
         shader
@@ -37,6 +68,8 @@ def select_shader_pair(
             f"found {len(pixels)}"
         )
     execution = pixels[0].get("semantic_execution", {}) if len(pixels) == 1 else {}
+    if execution.get("vertex_harness") == "fullscreen_uv":
+        return None, pixels[0]
     vertex_selector = execution.get("vertex_selector")
     if vertex_selector:
         vertices = [
@@ -175,7 +208,6 @@ def fuzz_semantic_shader(
         raise ToolchainError(f"unsupported texture filter: {texture_filter}")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, pixel, compiler)
-    vertex_path = corpus / vertex["dxbc_path"]
     baseline_path = corpus / pixel["dxbc_path"]
     harness_path = (
         harness
@@ -188,8 +220,19 @@ def fuzz_semantic_shader(
         )
 
     with tempfile.TemporaryDirectory(prefix="sm-gpu-fuzz-") as temporary:
+        temporary_path = Path(temporary)
         candidate_path = Path(temporary) / "semantic.dxbc"
         candidate_path.write_bytes(candidate)
+        if vertex is None:
+            vertex_path = temporary_path / "fullscreen-uv.dxbc"
+            vertex_bytecode = compiler.compile(
+                FULLSCREEN_UV_VERTEX, "harnessVS", "vs_5_0"
+            )
+            vertex_path.write_bytes(vertex_bytecode)
+            vertex_selector = "harness:fullscreen_uv"
+        else:
+            vertex_path = corpus / vertex["dxbc_path"]
+            vertex_selector = vertex["selector"]
         control = _invoke_harness(
             harness_path,
             vertex_path,
@@ -231,7 +274,7 @@ def fuzz_semantic_shader(
 
     report = {
         "source_name": source_name,
-        "vertex_selector": vertex["selector"],
+        "vertex_selector": vertex_selector,
         "pixel_selector": pixel["selector"],
         "semantic_recipe": pixel["semantic_recipe"],
         "semantic_execution": {
