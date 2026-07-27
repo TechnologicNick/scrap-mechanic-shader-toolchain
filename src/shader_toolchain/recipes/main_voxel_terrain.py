@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -28,6 +28,23 @@ The layer accumulation remains instruction ordered to preserve the original
 normal packing, array indexing and material blend rounding.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "voxelPositionState", 1: "packedMaterialIndices",
+    2: "layerWeightState", 3: "normalAndTangentState",
+    4: "viewProjectionState", 5: "parallaxRayState",
+    6: "parallaxStepState", 7: "layerZeroSample",
+    8: "layerOneSample", 9: "layerTwoSample",
+    10: "layerThreeSample", 11: "layerFourSample",
+    12: "layerFiveSample", 13: "diffuseBlendState",
+    14: "asgBlendState", 15: "normalBlendState",
+    16: "edgeTransitionState", 17: "materialArrayState",
+    18: "surfaceDerivativeState", 19: "encodedNormalState",
+    20: "parallaxOutputState", 21: "gbufferOutputState",
+    22: "tessellationAdjacencyState", 23: "voxelScratchA",
+    24: "voxelScratchB",
+}
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -97,7 +114,10 @@ def apply_main_voxel_terrain_recipe(
                 "o0.x = asfloat(asuint(o0.x) ^ 1u);\n"
                 "  return;\n}",
             )
-        variants[selector] = source
+        variants[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="Layer, parallax, and edge blends retain recovered ordering.",
+        )
     return emit_validated_module(
         staging,
         shaders,
