@@ -37,6 +37,7 @@ struct Options {
     uint32_t constant_buffer_slot = 5;
     bool random_constants = false;
     bool hdr_constants = false;
+    bool rect_constants = false;
     bool depth_output = false;
     bool warp = false;
 };
@@ -186,9 +187,11 @@ Options parse_options(int argc, char** argv) {
                 options.random_constants = true;
             } else if (profile == "hdr") {
                 options.hdr_constants = true;
+            } else if (profile == "rect") {
+                options.rect_constants = true;
             } else if (profile != "projection") {
                 throw std::runtime_error(
-                    "constant profile must be projection, random, or hdr");
+                    "constant profile must be projection, random, hdr, or rect");
             }
         } else if (name == "--filter") {
             const std::string filter = value();
@@ -230,7 +233,6 @@ Options parse_options(int argc, char** argv) {
             [](uint32_t slot) {
                 return slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
             })
-        || options.samplers.empty()
         || std::any_of(
             options.samplers.begin(),
             options.samplers.end(),
@@ -314,11 +316,22 @@ public:
     }
 
     void update_constants(uint32_t case_index) {
-        if (!options_.random_constants && !options_.hdr_constants) {
+        if (!options_.random_constants
+            && !options_.hdr_constants
+            && !options_.rect_constants) {
             return;
         }
         std::array<float, 62 * 4> constants{};
-        if (options_.hdr_constants) {
+        if (options_.rect_constants) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            const float extent = static_cast<float>(
+                std::max(1u, std::min(options_.width, options_.height) - 1));
+            constants[0] = case_index == 0 ? 0.0f : random.unit() * 4.0f;
+            constants[1] = constants[0];
+            constants[2] = case_index == 1 ? 1.0f : extent - constants[0];
+            constants[3] = constants[2];
+        } else if (options_.hdr_constants) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
             constants[3 * 4 + 3] = case_index == 0
@@ -925,7 +938,9 @@ int main(int argc, char** argv) {
                   << "  \"constant_profile\": \""
                   << (options.random_constants
                         ? "random"
-                        : (options.hdr_constants ? "hdr" : "projection"))
+                        : (options.hdr_constants
+                            ? "hdr"
+                            : (options.rect_constants ? "rect" : "projection")))
                   << "\",\n"
                   << "  \"output\": \""
                   << (options.depth_output ? "depth" : "color") << "\",\n"
