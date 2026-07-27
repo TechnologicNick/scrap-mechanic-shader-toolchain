@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..hlsl import module_variants
-from .common import emit_validated_module
+from .common import asset, emit_validated_module, ensure_recovered_cbuffer_include
 
 
 SEMANTIC_PHASE_MAP = """
@@ -57,10 +57,30 @@ def apply_post_composition_recipe(
             r"\1 ? float2(1, 1) : 0;",
             source,
         )
-    bodies = {
-        shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
-        for shader in shaders
-    }
+    ensure_recovered_cbuffer_include(
+        staging, "post_composition", "CB_PROJECTION",
+        "post_composition_projection_abi.hlsl",
+    )
+    ensure_recovered_cbuffer_include(
+        staging, "post_composition", "CB_PERFRAME",
+        "post_composition_perframe_abi.hlsl",
+    )
+    dry_body = asset("post_composition_pixel.hlsl")
+    bodies = {}
+    for shader in shaders:
+        defines = set(shader["defines"])
+        if "PS_UNDER_WATER_FOG" in defines:
+            bodies[shader["selector"]] = (
+                SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
+            )
+            continue
+        prefix = "".join(
+            f"#define {define} 1\n"
+            for define in ("ORTHO", "PS_CASCADE", "PS_REFLECTION_OFF",
+                           "PS_REFLECTION_SINGLE", "PS_REFLECTION_MULTI")
+            if define in defines
+        )
+        bodies[shader["selector"]] = prefix + dry_body
     executions = {}
     for shader in shaders:
         defines = set(shader["defines"])
@@ -105,6 +125,11 @@ def apply_post_composition_recipe(
             "output_components": 4,
             "output_targets": 2,
         }
+        if not underwater:
+            executions[shader["selector"]].update({
+                "absolute_tolerance": 4.0e-6,
+                "ulp_tolerance": 8,
+            })
     return emit_validated_module(
         staging, shaders, blobs, compiler,
         recipe_name="post_composition", bodies=bodies, executions=executions,
