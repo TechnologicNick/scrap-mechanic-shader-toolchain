@@ -2,31 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
-from ..hlsl import module_variants
-from .common import emit_validated_module
-
-
-SEMANTIC_PHASE_MAP = """
-/*
-Semantic phase map
-------------------
-1. Map each compute lane to one cluster cell; the 94 variants specialize only
-   the rectangular thread-grid dimensions and perspective/orthographic bounds.
-2. Decode four packed light-index ranges for the current depth slice.
-3. Construct the cell AABB in view space, including the nonlinear perspective
-   depth interval when ORTHO is absent.
-4. Test sphere, reflection, cone and frustum records against that AABB.
-5. Accumulate accepted IDs into eight 32-bit lane masks and write the masks to
-   the cell's 33-word clustered-light record.
-
-The executable body remains instruction-ordered because its packed bitfields,
-dynamic constant-buffer records and mask compaction must preserve integer DXBC.
-*/
-"""
+from .common import asset, emit_validated_module
 
 
 def _group_size(defines: list[str], axis: str) -> int:
@@ -52,19 +31,14 @@ def apply_cmp_cluster_culling_recipe(
         shader["stage"] != "compute" for shader in shaders
     ):
         return None
-    definitions = {shader["selector"]: shader["defines"] for shader in shaders}
-    expanded = module_variants(
-        (staging / "hlsl" / "cmp_cluster_culling.hlsl").read_text(
-            encoding="utf-8"
-        ),
-        definitions,
-    )
-    expanded = {
-        selector: re.sub(r"<< (r\d+\.[xyzw])", r"<< (int)\1", source)
-        for selector, source in expanded.items()
-    }
+    body = asset("cmp_cluster_culling_compute.hlsl")
     bodies = {
-        shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
+        shader["selector"]: "".join(
+            f"#define {name} {value if separator else '1'}\n"
+            for definition in shader["defines"]
+            for name, separator, value in [definition.partition("=")]
+            if name in {"GROUP_SIZE_X", "GROUP_SIZE_Y", "GROUP_SIZE_Z", "ORTHO"}
+        ) + body
         for shader in shaders
     }
     executions = {}
