@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -30,6 +30,20 @@ The executable blocks remain instruction-ordered because the 128 feature
 combinations share packed particle records and depth-sensitive blend math.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "particleRecordState", 1: "quadPositionState",
+    2: "cameraFacingState", 3: "axialOrientationState",
+    4: "atlasCoordinateState", 5: "viewDepthState",
+    6: "softIntersectionState", 7: "textureAndCutoffState",
+    8: "particleNormalState", 9: "clusterMaskState",
+    10: "lightIteratorState", 11: "lightGeometryState",
+    12: "attenuationState", 13: "shadowAndCookieState",
+    14: "particleLightingState", 15: "glowAndAdditiveState",
+    16: "forwardColorState", 17: "secondaryTargetState",
+    18: "particleScratch",
+}
 
 
 def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
@@ -143,7 +157,10 @@ def apply_main_particles_recipe(
             r"cb_arrSpot\[([^\]]+)/4\]\.(_m[0-9_]+)",
             r"cb_arrSpot[\1].xClip.\2", source,
         )
-        expanded[selector] = source
+        expanded[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="Sprite construction and soft-particle lighting retain DXBC order.",
+        )
     bodies = {
         shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
         for shader in shaders
