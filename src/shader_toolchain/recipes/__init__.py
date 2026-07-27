@@ -44,6 +44,7 @@ from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
 from .indirect_temporal import apply_indirect_temporal_recipe
 from .indirect_cascade_upscale import apply_indirect_cascade_upscale_recipe
+from .indirect_light import apply_indirect_light_recipe
 from .main_debug_drawer import apply_main_debug_drawer_recipe
 from .main_decals import apply_main_decals_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
@@ -109,6 +110,7 @@ RECIPES = (
     apply_gui_texture_box_array_recipe,
     apply_indirect_temporal_recipe,
     apply_indirect_cascade_upscale_recipe,
+    apply_indirect_light_recipe,
     apply_blur_pushmap_a_recipe,
     apply_blur_pushmap_b_recipe,
     apply_cube_map_face_present_recipe,

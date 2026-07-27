@@ -352,6 +352,20 @@ def abi_differences(baseline: dict[str, Any], candidate: dict[str, Any]) -> list
         elif field == "outputs":
             baseline_value = effective_signatures(baseline_value, outputs=True)
             candidate_value = effective_signatures(candidate_value, outputs=True)
+        elif field == "resources":
+            # D3D_SHADER_INPUT_BIND_DESC.Flags records compiler-observed
+            # component usage (for example TEXTURE_COMPONENT_0), not a runtime
+            # binding contract. Semantic source can legitimately make that
+            # advisory mask more precise while preserving type, slot, shape,
+            # return type and sample count.
+            baseline_value = [
+                {key: value for key, value in resource.items() if key != "flags"}
+                for resource in baseline_value
+            ]
+            candidate_value = [
+                {key: value for key, value in resource.items() if key != "flags"}
+                for resource in candidate_value
+            ]
         if baseline_value != candidate_value:
             differences.append(field)
     return differences
