@@ -833,11 +833,14 @@ def _invoke_harness(
     thread_group: list[int],
     failure_dir: Path | None,
     warp: bool,
+    fixture: str,
 ) -> dict[str, Any]:
     command = [
         str(harness),
         "--stage",
         shader_stage,
+        "--fixture",
+        fixture,
         "--baseline",
         str(baseline),
         "--candidate",
@@ -972,6 +975,7 @@ def fuzz_semantic_shader(
         vertex, shader = select_shader_pair(manifest, source_name, pixel_selector)
         shader_stage = "pixel"
     execution = shader.get("semantic_execution", {})
+    fixture = str(execution.get("fixture", ""))
     absolute_tolerance = float(
         execution.get("absolute_tolerance", absolute_tolerance)
     )
@@ -1223,6 +1227,7 @@ def fuzz_semantic_shader(
             thread_group=thread_group,
             failure_dir=None,
             warp=warp,
+            fixture=fixture,
         )
         if not control["passed"]:
             raise ToolchainError("GPU control run exceeded its tolerance")
@@ -1261,6 +1266,7 @@ def fuzz_semantic_shader(
             thread_group=thread_group,
             failure_dir=failure_dir,
             warp=warp,
+            fixture=fixture,
         )
 
     report = {
@@ -1270,6 +1276,7 @@ def fuzz_semantic_shader(
         "semantic_recipe": shader["semantic_recipe"],
         "source_probe_markers": applied_replacements,
         "semantic_execution": {
+            "fixture": fixture,
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
             "texture_mips": texture_mips,

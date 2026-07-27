@@ -104,6 +104,7 @@ struct StructuredOutputBinding {
 
 struct Options {
     ShaderStage stage = ShaderStage::pixel;
+    std::string fixture;
     std::filesystem::path vertex;
     std::filesystem::path baseline;
     std::filesystem::path candidate;
@@ -334,6 +335,8 @@ Options parse_options(int argc, char** argv) {
             } else if (stage != "pixel") {
                 throw std::runtime_error("stage must be pixel or compute");
             }
+        } else if (name == "--fixture") {
+            options.fixture = value();
         } else if (name == "--failure-dir") {
             options.failure_dir = std::filesystem::u8path(value());
         } else if (name == "--width") {
@@ -1035,6 +1038,12 @@ public:
             constants[4 * 4 + 3] = case_index == 0
                 ? 1.0f
                 : 0.5f + random.unit() * 1.5f;
+            if (options_.fixture == "ssgi-cascade") {
+                // cb_hdr.fMaxDepth is c5.x. Ordinary cases stay within the
+                // cascade range; the texture fixture supplies explicit far
+                // samples every sixteenth case.
+                constants[5 * 4 + 0] = 100.0f;
+            }
         } else if (profile == ConstantProfile::composition
                    || profile == ConstantProfile::composition_fog) {
             SplitMix64 random{
@@ -2049,6 +2058,17 @@ int main(int argc, char** argv) {
                         inputs[resource][component] = 4.0f
                             + static_cast<float>((component / 4 + index) % 17)
                                 * (1.0f / 16.0f);
+                    }
+                }
+                if (options.fixture == "ssgi-cascade" && index % 16u == 15u) {
+                    const uint32_t slot = options.textures[resource].slot;
+                    const size_t depth_component = slot == 2 ? 0u : 1u;
+                    if (slot == 0 || slot == 2 || slot == 3) {
+                        for (size_t component = 0;
+                             component < inputs[resource].size(); component += 4) {
+                            inputs[resource][component + depth_component] =
+                                slot == 2 ? 1024.0f : 16.0f;
+                        }
                     }
                 }
                 const bool monochrome = std::find(
