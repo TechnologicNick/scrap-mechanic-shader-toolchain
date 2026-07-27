@@ -12,6 +12,7 @@ from .copy_depth import apply_copy_depth_recipe
 from .copy_depth_rect_to_color import apply_copy_depth_rect_to_color_recipe
 from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
+from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
 from .post_blur import apply_post_blur_recipe
@@ -43,6 +44,7 @@ RECIPES = (
     apply_copy_clouds_recipe,
     apply_gui_silhouette_recipe,
     apply_gui_blurry_background_recipe,
+    apply_copy_to_shadow_atlas_recipe,
 )
 
 
