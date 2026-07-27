@@ -279,8 +279,22 @@ authoritative. `--recompile-all` prefers semantic HLSL where it is available.
 `post_volumetric.hlsl` is emitted as one shared medium/high implementation. Its
 top-level shader uses structural helpers for quality selection, packed light
 colors, density sampling, HDR encoding, clustered mask traversal, and sphere
-volume integration. The contraction-sensitive cone march is isolated behind a
-typed clustered-light interface and retains its recovered operation order.
+and cone volume integration. The recovered constant buffers are emitted as
+exact ABI includes, while the implementation uses typed rays, temporal history,
+ray segments, cone intersection, cookie projection, shadow sampling, and march
+helpers. It contains no decompiler register-state object or `SM_SELECT` chain.
+
+The targeted GPU fixture exercises cone masks, valid intersections, march-loop
+bodies, cookies, and shadows in both quality variants. Verify that every path is
+observable by injecting temporary output canaries and requiring the original
+DXBC comparison to reject each mutation:
+
+```powershell
+uv run python scripts/check-volumetric-coverage.py .\output --cases 256
+```
+
+The canaries are compile-time probes only; they do not modify the reconstructed
+corpus or the maintained semantic HLSL.
 
 The adjacent `rebuilt-shaders.sbc.build.json` classifies every selector. Edited
 branches also receive deterministic Microsoft assembly diffs under

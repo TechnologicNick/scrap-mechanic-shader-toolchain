@@ -907,7 +907,7 @@ public:
                 float* light = constants.data() + index * 12;
                 light[0] = 0.15f * (random.unit() - 0.5f);
                 light[1] = 0.15f * (random.unit() - 0.5f);
-                light[2] = -0.7f;
+                light[2] = -1.0f;
                 light[3] = 0.13f;
                 set_uint(index * 12 + 4, 0xff906000u);
                 light[5] = 1.0f;
@@ -917,28 +917,33 @@ public:
                 light[9] = 1.6f;
             };
             const auto initialize_cone = [&](uint32_t index) {
-                float* light = constants.data() + (765 + index * 40);
+                // Reflection reports packoffset(c765), measured in 16-byte
+                // registers; the fixture storage below is float-addressed.
+                constexpr size_t cone_float_offset = 765 * 4;
+                float* light = constants.data() + (cone_float_offset + index * 40);
                 light[0] = 0.0f;
                 light[1] = 0.0f;
-                light[2] = -5.0f;
+                light[2] = -0.7f;
                 light[3] = 0.1f;
                 light[4] = 0.0f;
                 light[5] = 0.0f;
                 light[6] = 1.0f;
                 light[7] = 1.0f;
-                light[8] = 0.0f;
+                light[8] = 20.0f;
                 light[9] = 0.1f;
-                light[10] = -5.0f;
+                light[10] = 1.0f;
                 light[11] = 20.0f;
                 uint32_t flags = 0xff906000u;
-                if (scenario == 5 || scenario == 7) flags |= 0x10u;
-                set_uint(765 + index * 40 + 12, flags);
+                if (scenario == 5 || scenario == 6 || scenario == 7) {
+                    flags |= 0x10u;
+                }
+                set_uint(cone_float_offset + index * 40 + 12, flags);
                 light[13] = 1.0f;
                 light[14] = 0.0f;
                 light[15] = 2.0f;
                 light[16] = 2.0f;
                 light[17] = 0.25f;
-                light[18] = 0.0f;
+                light[18] = -1.0f;
                 light[19] = 1.0f;
                 light[20] = 1.0f;
                 light[25] = 1.0f;
@@ -2008,6 +2013,12 @@ int main(int argc, char** argv) {
         std::string failed_pattern;
         uint32_t failed_case = 0;
         Comparison failure;
+        const bool volumetric_fixture = std::any_of(
+            options.constant_buffers.begin(),
+            options.constant_buffers.end(),
+            [](const ConstantBinding& binding) {
+                return binding.profile == ConstantProfile::volumetric_cluster;
+            });
 
         for (uint32_t index = 0; index < options.cases; ++index) {
             std::string pattern;
@@ -2029,6 +2040,16 @@ int main(int argc, char** argv) {
                         random);
                 if (resource == 0) {
                     pattern = resource_pattern;
+                }
+                if (volumetric_fixture && options.textures[resource].slot == 0) {
+                    // The shader reads mip 2 as linear view-space depth. Keep
+                    // it beyond both cone roots so medium and high marches run.
+                    for (size_t component = 0;
+                         component < inputs[resource].size(); component += 4) {
+                        inputs[resource][component] = 4.0f
+                            + static_cast<float>((component / 4 + index) % 17)
+                                * (1.0f / 16.0f);
+                    }
                 }
                 const bool monochrome = std::find(
                     options.monochrome_texture_slots.begin(),

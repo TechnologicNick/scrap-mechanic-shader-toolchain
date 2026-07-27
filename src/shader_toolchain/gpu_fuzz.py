@@ -945,6 +945,7 @@ def fuzz_semantic_shader(
     harness: Path | None = None,
     warp: bool = False,
     verify_corpus: bool = True,
+    source_replacements: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compile a semantic pixel or compute shader and compare exact GPU output."""
     if cases < 1 or width < 1 or height < 1:
@@ -1145,6 +1146,19 @@ def fuzz_semantic_shader(
         raise ToolchainError("thread group must contain three positive sizes")
     compiler = D3DCompiler()
     candidate, source = compile_semantic_shader(corpus, manifest, shader, compiler)
+    applied_replacements: list[str] = []
+    if source_replacements:
+        for marker, replacement in source_replacements.items():
+            occurrences = source.count(marker)
+            if occurrences != 1:
+                raise ToolchainError(
+                    f"source probe marker must occur exactly once: {marker!r} "
+                    f"(found {occurrences})"
+                )
+            source = source.replace(marker, replacement)
+            applied_replacements.append(marker)
+        profile = "cs_5_0" if shader_stage == "compute" else "ps_5_0"
+        candidate = compiler.compile(source, shader["entry_point"], profile)
     baseline_path = corpus / shader["dxbc_path"]
     harness_path = (
         harness
@@ -1254,6 +1268,7 @@ def fuzz_semantic_shader(
         "vertex_selector": vertex_selector,
         f"{shader_stage}_selector": shader["selector"],
         "semantic_recipe": shader["semantic_recipe"],
+        "source_probe_markers": applied_replacements,
         "semantic_execution": {
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
