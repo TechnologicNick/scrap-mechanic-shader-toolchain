@@ -111,7 +111,7 @@ def build_cache(
             raise ToolchainError(f"output path already exists: {target}")
     if allow_dxbc_fallback and not recompile_all:
         raise ToolchainError("--allow-dxbc-fallback requires --recompile-all")
-    verify_output(corpus)
+    verify_output(corpus, verify_hlsl_fingerprints=False)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("corpus_format_version") != 2:
         raise ToolchainError(
@@ -121,7 +121,14 @@ def build_cache(
     modules: dict[str, dict[str, str]] = {}
     for source_name in {shader["source_name"] for shader in shaders}:
         path = corpus / "hlsl" / f"{source_name}.hlsl"
-        modules[source_name] = module_variants(path.read_text(encoding="utf-8"))
+        modules[source_name] = module_variants(
+            path.read_text(encoding="utf-8"),
+            {
+                shader["selector"]: shader["defines"]
+                for shader in shaders
+                if shader["source_name"] == source_name
+            },
+        )
 
     requested_workers = jobs if jobs is not None else (os.cpu_count() or 1)
     if requested_workers < 1:

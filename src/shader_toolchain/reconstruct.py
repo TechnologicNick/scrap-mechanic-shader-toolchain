@@ -12,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .hlsl import hlsl_token_sha256
+from .hlsl import hlsl_token_sha256, module_variants, render_factored_module
 from .sbc import D3DCompiler, parse_cache, parse_payload, safe_stem
 
 
@@ -39,7 +39,12 @@ def output_digest(output: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_output(output: Path, expected_modules: int = 80) -> dict[str, Any]:
+def verify_output(
+    output: Path,
+    expected_modules: int = 80,
+    *,
+    verify_hlsl_fingerprints: bool = True,
+) -> dict[str, Any]:
     """Validate a reconstructed corpus and return its reproducibility digest."""
     manifest_path = output / "manifest.json"
     hlsl_dir = output / "hlsl"
@@ -75,6 +80,32 @@ def verify_output(output: Path, expected_modules: int = 80) -> dict[str, Any]:
     ]
     if missing_selectors:
         errors.append(f"{len(missing_selectors)} shader selectors are missing")
+
+    if verify_hlsl_fingerprints and manifest.get("corpus_format_version", 1) >= 2:
+        expanded_modules = {
+            source_name: module_variants(
+                source,
+                {
+                    shader["selector"]: shader["defines"]
+                    for shader in shaders
+                    if shader["source_name"] == source_name
+                },
+            )
+            for source_name, source in module_text.items()
+        }
+        changed_variants = []
+        for shader in shaders:
+            expanded = expanded_modules.get(shader["source_name"], {}).get(
+                shader["selector"]
+            )
+            if expanded is None or hlsl_token_sha256(expanded) != shader.get(
+                "hlsl_token_sha256"
+            ):
+                changed_variants.append(shader["selector"])
+        if changed_variants:
+            errors.append(
+                f"{len(changed_variants)} HLSL variants differ from manifest fingerprints"
+            )
 
     bad_dxbc = []
     for shader in shaders:
@@ -191,26 +222,7 @@ def normalize_dx_decompiler(source: str, entry_point: str) -> str:
 
 
 def render_module(source_name: str, variants: list[dict[str, Any]]) -> str:
-    lines = [
-        f"// Reconstructed Scrap Mechanic shader module: {source_name}.hlsl",
-        "// This is deterministic lifted source, not the unavailable original HLSL.",
-        "// Define exactly one SM_SHADER_<key> selector before compiling.",
-        "",
-    ]
-    for position, variant in enumerate(variants):
-        directive = "#if" if position == 0 else "#elif"
-        lines.extend(
-            [
-                f"{directive} defined({variant['selector']})",
-                f"// Shader key: {variant['shader_key']}",
-                f"// Stage: {variant['stage']}; entry point: {variant['entry_point']}",
-                f"// Descriptor: {variant['descriptor']}",
-                f"// Lift status: {variant['lift_status']}; backend: {variant['backend']}",
-                variant["hlsl"].rstrip(),
-            ]
-        )
-    lines.extend(["#endif", ""])
-    return "\n".join(lines)
+    return render_factored_module(source_name, variants)
 
 
 def reconstruct(
@@ -314,10 +326,23 @@ def reconstruct(
                 render_module(source_name, variants), encoding="utf-8", newline="\n"
             )
 
+        factored_hlsl_bytes = sum(
+            path.stat().st_size for path in hlsl_dir.glob("*.hlsl")
+        )
+        expanded_hlsl_bytes = sum(
+            len(variant["hlsl"].encode("utf-8"))
+            for variants in modules.values()
+            for variant in variants
+        )
+
         summary = {
             **header,
             "module_count": len(modules),
             "shader_count": len(records),
+            "factored_hlsl_bytes": factored_hlsl_bytes,
+            "expanded_hlsl_bytes": expanded_hlsl_bytes,
+            "deduplicated_hlsl_bytes": expanded_hlsl_bytes
+            - factored_hlsl_bytes,
             "backends": dict(
                 sorted(
                     (backend, sum(r["backend"] == backend for r in records))
@@ -333,6 +358,7 @@ def reconstruct(
         }
         manifest = {
             "corpus_format_version": 2,
+            "module_format": "factored-hlsl-v1",
             "summary": summary,
             "resource_ids": metadata["resource_ids"],
             "jobs": metadata["jobs"],

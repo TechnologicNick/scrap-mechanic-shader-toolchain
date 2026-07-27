@@ -1,8 +1,9 @@
-import json
 import hashlib
+import json
 
 import pytest
 
+from shader_toolchain.hlsl import HlslFormatError, module_variants
 from shader_toolchain.reconstruct import (
     ToolchainError,
     normalize_3dmigoto,
@@ -34,33 +35,54 @@ void main)
 def test_render_module_uses_one_selector_branch_per_variant() -> None:
     variants = [
         {
-            "selector": "SM_SHADER_A",
+            "selector": "SM_SHADER_000000000000000A",
             "shader_key": "0x000000000000000a",
             "stage": "pixel",
             "entry_point": "mainPS",
             "descriptor": "example:mainPS  PIXEL_SHADER",
             "lift_status": "lifted",
             "backend": "3dmigoto",
-            "hlsl": "void mainPS() {}\n",
+            "defines": ["PIXEL_SHADER"],
+            "hlsl": "float shared;\nvoid mainPS() {}\nfloat tail;\n",
         },
         {
-            "selector": "SM_SHADER_B",
+            "selector": "SM_SHADER_000000000000000B",
             "shader_key": "0x000000000000000b",
             "stage": "vertex",
             "entry_point": "mainVS",
             "descriptor": "example:mainVS  VERTEX_SHADER",
             "lift_status": "lifted",
             "backend": "3dmigoto",
-            "hlsl": "void mainVS() {}\n",
+            "defines": ["VERTEX_SHADER", "GROUP_SIZE_X=8"],
+            "hlsl": "float shared;\nvoid mainVS() {}\nfloat tail;\n",
         },
     ]
 
     result = render_module("example", variants)
 
-    assert result.count("defined(SM_SHADER_") == 2
-    assert "#if defined(SM_SHADER_A)" in result
-    assert "#elif defined(SM_SHADER_B)" in result
-    assert result.endswith("#endif\n")
+    assert result.count("float shared;") == 1
+    assert result.count("float tail;") == 1
+    assert "defined(PIXEL_SHADER)" in result
+    assert "#define GROUP_SIZE_X 8" in result
+    definitions = {
+        "SM_SHADER_000000000000000A": ["PIXEL_SHADER"],
+        "SM_SHADER_000000000000000B": ["VERTEX_SHADER", "GROUP_SIZE_X=8"],
+    }
+    expanded = module_variants(result, definitions)
+    assert "void mainPS() {}" in expanded["SM_SHADER_000000000000000A"]
+    assert "void mainVS() {}" in expanded["SM_SHADER_000000000000000B"]
+
+    bad_condition = result.replace(
+        "#if defined(PIXEL_SHADER) // SM_SELECT:",
+        "#if defined(VERTEX_SHADER) // SM_SELECT:",
+        1,
+    )
+    with pytest.raises(HlslFormatError, match="expression disagrees"):
+        module_variants(bad_condition, definitions)
+
+    bad_bridge = result.replace("#define PIXEL_SHADER 1", "#define PIXEL_SHADER 0")
+    with pytest.raises(HlslFormatError, match="bridge differs"):
+        module_variants(bad_bridge, definitions)
 
 
 def test_verify_output_checks_manifest_and_is_deterministic(tmp_path) -> None:
