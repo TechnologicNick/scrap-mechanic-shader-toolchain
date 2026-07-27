@@ -52,6 +52,7 @@ struct TextureBinding {
     uint32_t slot;
     TextureKind kind;
     uint32_t mip_levels;
+    uint32_t slices = 0;
 };
 
 struct StructuredInputBinding {
@@ -212,6 +213,10 @@ uint32_t texture_slices(TextureKind kind) {
     return 1;
 }
 
+uint32_t texture_slices(const TextureBinding& binding) {
+    return binding.slices == 0 ? texture_slices(binding.kind) : binding.slices;
+}
+
 Options parse_options(int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -274,6 +279,9 @@ Options parse_options(int argc, char** argv) {
                     throw std::runtime_error("textures must use slot:kind");
                 }
                 const size_t second = binding.find(':', first + 1);
+                const size_t third = second == std::string::npos
+                    ? std::string::npos
+                    : binding.find(':', second + 1);
                 const std::string kind = binding.substr(
                     first + 1,
                     second == std::string::npos
@@ -284,7 +292,14 @@ Options parse_options(int argc, char** argv) {
                     parse_texture_kind(kind),
                     second == std::string::npos
                         ? 1u
-                        : static_cast<uint32_t>(parse_u64(binding.substr(second + 1))),
+                        : static_cast<uint32_t>(parse_u64(binding.substr(
+                            second + 1,
+                            third == std::string::npos
+                                ? std::string::npos
+                                : third - second - 1))),
+                    third == std::string::npos
+                        ? 0u
+                        : static_cast<uint32_t>(parse_u64(binding.substr(third + 1))),
                 });
             }
         } else if (name == "--structured-inputs") {
@@ -436,9 +451,13 @@ Options parse_options(int argc, char** argv) {
     if (std::any_of(
             options.textures.begin(), options.textures.end(),
             [](const TextureBinding& texture) {
-                return texture.mip_levels == 0 || texture.mip_levels > 13;
+                const uint32_t slices = texture_slices(texture);
+                return texture.mip_levels == 0 || texture.mip_levels > 13
+                    || slices == 0 || slices > 2048
+                    || (texture.kind == TextureKind::two_d && slices != 1)
+                    || (texture.kind == TextureKind::cube && slices != 6);
             })) {
-        throw std::runtime_error("texture mip count must be between 1 and 13");
+        throw std::runtime_error("invalid texture mip count or slice count");
     }
     if (std::any_of(
             options.textures.begin(),
@@ -537,8 +556,9 @@ public:
     D3D_FEATURE_LEVEL feature_level() const { return feature_level_; }
 
     void update_input(size_t index, const std::vector<float>& values) {
-        const TextureKind kind = options_.textures.at(index).kind;
-        const uint32_t mip_levels = options_.textures.at(index).mip_levels;
+        const TextureBinding& binding = options_.textures.at(index);
+        const TextureKind kind = binding.kind;
+        const uint32_t mip_levels = binding.mip_levels;
         const UINT row_pitch = options_.width * 4 * sizeof(float);
         const UINT slice_pitch = row_pitch * options_.height;
         if (kind == TextureKind::three_d) {
@@ -546,7 +566,7 @@ public:
                 inputs_.at(index).Get(), 0, nullptr, values.data(),
                 row_pitch, slice_pitch);
         } else {
-            const uint32_t slices = texture_slices(kind);
+            const uint32_t slices = texture_slices(binding);
             for (uint32_t slice = 0; slice < slices; ++slice) {
                 context_->UpdateSubresource(
                     inputs_.at(index).Get(),
@@ -894,7 +914,7 @@ private:
             D3D11_TEXTURE3D_DESC description{};
             description.Width = options_.width;
             description.Height = options_.height;
-            description.Depth = texture_slices(kind);
+            description.Depth = texture_slices(binding);
             description.MipLevels = binding.mip_levels;
             description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
             description.Usage = D3D11_USAGE_DEFAULT;
@@ -911,7 +931,7 @@ private:
         description.Width = options_.width;
         description.Height = options_.height;
         description.MipLevels = binding.mip_levels;
-        description.ArraySize = texture_slices(kind);
+        description.ArraySize = texture_slices(binding);
         description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
         description.SampleDesc.Count = 1;
         description.Usage = D3D11_USAGE_DEFAULT;
@@ -1428,7 +1448,7 @@ int main(int argc, char** argv) {
         for (size_t index = 0; index < inputs.size(); ++index) {
             inputs[index].resize(
                 static_cast<size_t>(options.width) * options.height * 4
-                * texture_slices(options.textures[index].kind));
+                * texture_slices(options.textures[index]));
         }
         std::vector<std::vector<uint32_t>> structured_inputs;
         for (const StructuredInputBinding& binding : options.structured_inputs) {
@@ -1454,7 +1474,7 @@ int main(int argc, char** argv) {
                     index + static_cast<uint32_t>(resource * 3),
                     options.width,
                     options.height
-                        * texture_slices(options.textures[resource].kind),
+                        * texture_slices(options.textures[resource]),
                     random);
                 if (resource == 0) {
                     pattern = resource_pattern;

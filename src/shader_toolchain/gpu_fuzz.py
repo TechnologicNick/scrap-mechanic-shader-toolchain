@@ -216,6 +216,46 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_TERRAIN_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float2 uv : UV0;
+    float2 worldUv : WORLD_UV0;
+    float3 color : COLOR0;
+    nointerpolation uint tileIndex : TILE_INDEX0;
+    float4 tangent : TEXCOORD5;
+    float4 bitangent : TEXCOORD6;
+    float3 normal : TEXCOORD7;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.uv = coordinates[vertexId];
+    output.worldUv = coordinates[vertexId] * 0.25;
+    output.color = float3(0.25, 0.5, 0.75);
+    output.tileIndex = 0;
+    output.tangent = float4(1.0, 0.0, 0.0, 0.0);
+    output.bitangent = float4(0.0, 1.0, 0.0, 0.0);
+    output.normal = float3(0.0, 0.0, 1.0);
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
@@ -223,6 +263,7 @@ VERTEX_HARNESSES = {
     "fullscreen_clutter_impostor": FULLSCREEN_CLUTTER_IMPOSTOR_VERTEX,
     "fullscreen_text": FULLSCREEN_TEXT_VERTEX,
     "fullscreen_billboard": FULLSCREEN_BILLBOARD_VERTEX,
+    "fullscreen_terrain": FULLSCREEN_TERRAIN_VERTEX,
 }
 
 
@@ -332,6 +373,7 @@ def _invoke_harness(
     texture_slots: list[int],
     texture_kinds: list[str],
     texture_mips: list[int],
+    texture_slices: list[int],
     structured_inputs: list[dict[str, int]],
     structured_output_elements: int,
     structured_output_stride: int,
@@ -371,9 +413,10 @@ def _invoke_harness(
         str(relative_tolerance),
         "--textures",
         ",".join(
-            f"{slot}:{kind}:{mips}"
-            for slot, kind, mips in zip(
-                texture_slots, texture_kinds, texture_mips, strict=True
+            f"{slot}:{kind}:{mips}:{slices}"
+            for slot, kind, mips, slices in zip(
+                texture_slots, texture_kinds, texture_mips, texture_slices,
+                strict=True
             )
         ),
         "--structured-inputs",
@@ -487,6 +530,20 @@ def fuzz_semantic_shader(
         mips < 1 or mips > 13 for mips in texture_mips
     ):
         raise ToolchainError("invalid texture mip counts")
+    default_slices = {"2d": 1, "3d": 4, "2darray": 6, "cube": 6}
+    texture_slices = [
+        int(slices)
+        for slices in execution.get(
+            "texture_slices", [default_slices[kind] for kind in texture_kinds]
+        )
+    ]
+    if len(texture_slices) != len(texture_slots) or any(
+        slices < 1 or slices > 2048 for slices in texture_slices
+    ) or any(
+        kind == "2d" and slices != 1 or kind == "cube" and slices != 6
+        for kind, slices in zip(texture_kinds, texture_slices, strict=True)
+    ):
+        raise ToolchainError("invalid texture slice counts")
     structured_inputs = [
         {
             "slot": int(binding["slot"]),
@@ -606,6 +663,7 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
+            texture_slices=texture_slices,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -637,6 +695,7 @@ def fuzz_semantic_shader(
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
+            texture_slices=texture_slices,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
             structured_output_stride=structured_output_stride,
@@ -660,6 +719,7 @@ def fuzz_semantic_shader(
             "texture_slots": texture_slots,
             "texture_kinds": texture_kinds,
             "texture_mips": texture_mips,
+            "texture_slices": texture_slices,
             "structured_inputs": structured_inputs,
             "structured_output_elements": structured_output_elements,
             "structured_output_stride": structured_output_stride,
