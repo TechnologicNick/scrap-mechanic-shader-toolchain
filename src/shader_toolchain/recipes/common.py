@@ -120,9 +120,15 @@ def emit_validated_module(
         source = resolve_local_includes(
             expanded[shader["selector"]], module_path, semantic_root
         )
-        candidate = compiler.compile(
-            source, shader["entry_point"], PROFILES[shader["stage"]]
-        )
+        try:
+            candidate = compiler.compile(
+                source, shader["entry_point"], PROFILES[shader["stage"]]
+            )
+        except RuntimeError as error:
+            raise RuntimeError(
+                f"{recipe_name} {shader['selector']} semantic recipe does not "
+                f"compile: {error}"
+            ) from error
         comparison, _baseline_assembly, _candidate_assembly = compare_bytecodes(
             blobs[shader["bundle_index"]], candidate, compiler, reflector
         )

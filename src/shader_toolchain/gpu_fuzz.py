@@ -562,6 +562,50 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+FULLSCREEN_PARTICLE_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    float4 color : COLOR0;
+    float3 light : LIGHT0;
+    float3 lightDirection : LIGHT_DIR0;
+    float4 tangent : TANGENT0;
+    float2 texcoord : TEXCOORD1;
+    float2 viewPosition : TEXCOORD2;
+    float2 edgeData : TEXCOORD4;
+    float3 linearDepth : LINEAR_DEPTH0;
+    nointerpolation uint techniqueIndex : PS_TECH_INDEX0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] =
+    {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    static const float2 coordinates[3] =
+    {
+        float2(0.0,  1.0),
+        float2(2.0,  1.0),
+        float2(0.0, -1.0),
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.5, 1.0);
+    output.color = float4(0.25, 0.5, 0.75, 0.625);
+    output.light = float3(0.4, 0.5, 0.6);
+    output.lightDirection = normalize(float3(0.25, 0.5, 0.75));
+    output.tangent = float4(0.0, 1.0, 0.0, 1.0);
+    output.texcoord = coordinates[vertexId];
+    output.viewPosition = positions[vertexId];
+    output.edgeData = float2(0.375, 0.625);
+    output.linearDepth = float3(0.0, 0.0, 10.0);
+    output.techniqueIndex = 0;
+    return output;
+}
+"""
+
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
     "decals": DECALS_VERTEX,
@@ -578,6 +622,7 @@ VERTEX_HARNESSES = {
     "fullscreen_clutter": FULLSCREEN_CLUTTER_VERTEX,
     "fullscreen_block": FULLSCREEN_BLOCK_VERTEX,
     "fullscreen_character": FULLSCREEN_CHARACTER_VERTEX,
+    "fullscreen_particle": FULLSCREEN_PARTICLE_VERTEX,
 }
 
 
