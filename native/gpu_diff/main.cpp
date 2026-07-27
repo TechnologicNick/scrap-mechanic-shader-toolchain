@@ -27,6 +27,7 @@ enum class ConstantProfile {
     hdr,
     rect,
     cluster,
+    reflection,
 };
 
 struct ConstantBinding {
@@ -55,6 +56,7 @@ struct TextureBinding {
 struct StructuredInputBinding {
     uint32_t slot;
     uint32_t elements;
+    uint32_t stride = sizeof(uint32_t);
 };
 
 struct Options {
@@ -74,6 +76,7 @@ struct Options {
     std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
     std::vector<StructuredInputBinding> structured_inputs;
     uint32_t structured_output_elements = 0;
+    uint32_t structured_output_stride = sizeof(uint32_t);
     std::vector<std::pair<uint32_t, bool>> samplers = {{6, false}};
     std::vector<ConstantBinding> constant_buffers = {
         {5, ConstantProfile::projection}};
@@ -164,8 +167,9 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "hdr") return ConstantProfile::hdr;
     if (profile == "rect") return ConstantProfile::rect;
     if (profile == "cluster") return ConstantProfile::cluster;
+    if (profile == "reflection") return ConstantProfile::reflection;
     throw std::runtime_error(
-        "constant profile must be projection, random, hdr, rect, or cluster");
+        "constant profile must be projection, random, hdr, rect, cluster, or reflection");
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -175,6 +179,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::hdr: return "hdr";
     case ConstantProfile::rect: return "rect";
     case ConstantProfile::cluster: return "cluster";
+    case ConstantProfile::reflection: return "reflection";
     }
     return "unknown";
 }
@@ -284,18 +289,26 @@ Options parse_options(int argc, char** argv) {
             std::stringstream bindings(value());
             std::string binding;
             while (std::getline(bindings, binding, ',')) {
-                const size_t separator = binding.find(':');
-                if (separator == std::string::npos) {
+                const size_t first = binding.find(':');
+                const size_t second = binding.find(':', first + 1);
+                if (first == std::string::npos) {
                     throw std::runtime_error(
-                        "structured inputs must use slot:elements");
+                        "structured inputs must use slot:elements[:stride]");
                 }
                 options.structured_inputs.push_back({
-                    static_cast<uint32_t>(parse_u64(binding.substr(0, separator))),
-                    static_cast<uint32_t>(parse_u64(binding.substr(separator + 1))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(0, first))),
+                    static_cast<uint32_t>(parse_u64(binding.substr(
+                        first + 1, second == std::string::npos
+                            ? std::string::npos : second - first - 1))),
+                    second == std::string::npos ? 4u : static_cast<uint32_t>(
+                        parse_u64(binding.substr(second + 1))),
                 });
             }
         } else if (name == "--structured-output-elements") {
             options.structured_output_elements =
+                static_cast<uint32_t>(parse_u64(value()));
+        } else if (name == "--structured-output-stride") {
+            options.structured_output_stride =
                 static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--sampler-slot") {
             options.samplers.front().first =
@@ -435,7 +448,8 @@ Options parse_options(int argc, char** argv) {
             options.structured_inputs.end(),
             [](const StructuredInputBinding& input) {
                 return input.slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
-                    || input.elements == 0;
+                    || input.elements == 0 || input.stride == 0
+                    || (input.stride & 3) != 0;
             })
         || std::any_of(
             options.samplers.begin(),
@@ -451,6 +465,10 @@ Options parse_options(int argc, char** argv) {
                     >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
             })) {
         throw std::runtime_error("resource binding slot is out of range");
+    }
+    if (options.structured_output_stride == 0
+        || (options.structured_output_stride & 3) != 0) {
+        throw std::runtime_error("structured output stride must be a positive multiple of four");
     }
     return options;
 }
@@ -568,7 +586,7 @@ public:
         }
     }
 
-    static constexpr size_t constant_register_count = 574;
+    static constexpr size_t constant_register_count = 4096;
 
     std::array<float, constant_register_count * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
@@ -578,6 +596,21 @@ public:
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
             std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::reflection) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            for (uint32_t probe = 0; probe < 128; ++probe) {
+                float* record = constants.data() + probe * 40;
+                for (uint32_t component = 0; component < 40; ++component) {
+                    record[component] = random.unit() * 40.0f - 20.0f;
+                }
+                record[3] = case_index == 0 ? static_cast<float>(probe % 3)
+                    : case_index == 1 ? static_cast<float>(3 + probe % 32)
+                    : static_cast<float>((probe & 1) ? 3 + probe % 64 : probe % 3);
+                record[4] = (probe % 5 == 0 ? 80.0f : 4.0f) + random.unit();
+                record[5] = (probe % 7 == 0 ? 70.0f : 5.0f) + random.unit();
+                record[6] = (probe % 11 == 0 ? 65.0f : 6.0f) + random.unit();
+            }
         } else if (profile == ConstantProfile::rect) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
@@ -755,10 +788,12 @@ public:
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context_->Map(staging_resource, 0, D3D11_MAP_READ, 0, &mapped), "Map output");
         if (options_.structured_output_elements > 0) {
-            std::vector<float> output(options_.structured_output_elements);
+            std::vector<float> output(
+                static_cast<size_t>(options_.structured_output_elements)
+                * options_.structured_output_stride / sizeof(float));
             std::memcpy(
                 output.data(), mapped.pData,
-                output.size() * sizeof(uint32_t));
+                output.size() * sizeof(float));
             context_->Unmap(staging_resource, 0);
             return output;
         }
@@ -879,14 +914,15 @@ private:
     }
 
     ComPtr<ID3D11Buffer> create_structured_buffer(
-        uint32_t elements, D3D11_USAGE usage, UINT bind_flags, UINT cpu_flags) {
+        uint32_t elements, uint32_t stride, D3D11_USAGE usage,
+        UINT bind_flags, UINT cpu_flags) {
         D3D11_BUFFER_DESC description{};
-        description.ByteWidth = elements * sizeof(uint32_t);
+        description.ByteWidth = elements * stride;
         description.Usage = usage;
         description.BindFlags = bind_flags;
         description.CPUAccessFlags = cpu_flags;
         description.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        description.StructureByteStride = sizeof(uint32_t);
+        description.StructureByteStride = stride;
         ComPtr<ID3D11Buffer> buffer;
         check(device_->CreateBuffer(&description, nullptr, &buffer), "Create structured buffer");
         return buffer;
@@ -934,6 +970,7 @@ private:
         for (const StructuredInputBinding& binding : options_.structured_inputs) {
             structured_inputs_.push_back(create_structured_buffer(
                 binding.elements,
+                binding.stride,
                 D3D11_USAGE_DEFAULT,
                 D3D11_BIND_SHADER_RESOURCE,
                 0));
@@ -948,11 +985,13 @@ private:
             if (options_.structured_output_elements > 0) {
                 structured_output_ = create_structured_buffer(
                     options_.structured_output_elements,
+                    options_.structured_output_stride,
                     D3D11_USAGE_DEFAULT,
                     D3D11_BIND_UNORDERED_ACCESS,
                     0);
                 structured_staging_ = create_structured_buffer(
                     options_.structured_output_elements,
+                    options_.structured_output_stride,
                     D3D11_USAGE_STAGING,
                     0,
                     D3D11_CPU_ACCESS_READ);
@@ -1379,7 +1418,8 @@ int main(int argc, char** argv) {
         }
         std::vector<std::vector<uint32_t>> structured_inputs;
         for (const StructuredInputBinding& binding : options.structured_inputs) {
-            structured_inputs.emplace_back(binding.elements);
+            structured_inputs.emplace_back(
+                static_cast<size_t>(binding.elements) * binding.stride / 4);
         }
         uint64_t exact_values = 0;
         uint64_t compared_values = 0;
@@ -1412,10 +1452,38 @@ int main(int argc, char** argv) {
                 if (index == 0) {
                     std::fill(values.begin(), values.end(), 0u);
                 } else if (index == 1) {
-                    std::fill(values.begin(), values.end(), 1u);
+                    if (options.structured_inputs[resource].stride == 32) {
+                        std::fill(values.begin(), values.end(), 0u);
+                        for (size_t element = 0;
+                             element < options.structured_inputs[resource].elements;
+                             ++element) {
+                            float* bounds = reinterpret_cast<float*>(
+                                values.data() + element * 8);
+                            bounds[0] = bounds[1] = bounds[2] = -1.0f;
+                            bounds[4] = bounds[5] = bounds[6] = 1.0f;
+                        }
+                    } else {
+                        std::fill(values.begin(), values.end(), 1u);
+                    }
                 } else {
-                    for (uint32_t& value : values) {
-                        value = static_cast<uint32_t>(random.next());
+                    if (options.structured_inputs[resource].stride == 32) {
+                        for (size_t element = 0;
+                             element < options.structured_inputs[resource].elements;
+                             ++element) {
+                            float* bounds = reinterpret_cast<float*>(
+                                values.data() + element * 8);
+                            for (uint32_t axis = 0; axis < 3; ++axis) {
+                                const float center = random.unit() * 40.0f - 20.0f;
+                                const float extent = 0.1f + random.unit() * 80.0f;
+                                bounds[axis] = center - extent;
+                                bounds[4 + axis] = center + extent;
+                            }
+                            bounds[3] = bounds[7] = 0.0f;
+                        }
+                    } else {
+                        for (uint32_t& value : values) {
+                            value = static_cast<uint32_t>(random.next());
+                        }
                     }
                 }
                 runner.update_structured_input(resource, values);
@@ -1527,6 +1595,8 @@ int main(int argc, char** argv) {
                   << "  \"output_targets\": " << options.output_targets << ",\n"
                   << "  \"structured_output_elements\": "
                   << options.structured_output_elements << ",\n"
+                  << "  \"structured_output_stride\": "
+                  << options.structured_output_stride << ",\n"
                   << "  \"compared_values\": " << compared_values << ",\n"
                   << "  \"exact_values\": " << exact_values << ",\n"
                   << "  \"max_absolute_error\": " << max_absolute_error << ",\n"

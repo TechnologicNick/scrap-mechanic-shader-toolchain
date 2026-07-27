@@ -221,6 +221,7 @@ def _invoke_harness(
     texture_mips: list[int],
     structured_inputs: list[dict[str, int]],
     structured_output_elements: int,
+    structured_output_stride: int,
     samplers: list[dict[str, Any]],
     constant_buffers: list[dict[str, Any]],
     output_kind: str,
@@ -264,11 +265,13 @@ def _invoke_harness(
         ),
         "--structured-inputs",
         ",".join(
-            f"{binding['slot']}:{binding['elements']}"
+            f"{binding['slot']}:{binding['elements']}:{binding['stride']}"
             for binding in structured_inputs
         ),
         "--structured-output-elements",
         str(structured_output_elements),
+        "--structured-output-stride",
+        str(structured_output_stride),
         "--samplers",
         ",".join(
             f"{sampler['slot']}:{sampler['filter']}" for sampler in samplers
@@ -372,16 +375,23 @@ def fuzz_semantic_shader(
     ):
         raise ToolchainError("invalid texture mip counts")
     structured_inputs = [
-        {"slot": int(binding["slot"]), "elements": int(binding["elements"])}
+        {
+            "slot": int(binding["slot"]),
+            "elements": int(binding["elements"]),
+            "stride": int(binding.get("stride", 4)),
+        }
         for binding in execution.get("structured_inputs", [])
     ]
     structured_output_elements = int(
         execution.get("structured_output_elements", 0)
     )
+    structured_output_stride = int(execution.get("structured_output_stride", 4))
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
+        or binding["stride"] < 4 or binding["stride"] % 4
         for binding in structured_inputs
-    ) or structured_output_elements < 0:
+    ) or structured_output_elements < 0 or structured_output_stride < 4 \
+            or structured_output_stride % 4:
         raise ToolchainError("invalid structured-buffer binding")
     samplers = execution.get(
         "samplers",
@@ -423,7 +433,7 @@ def fuzz_semantic_shader(
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if any(
         binding["profile"] not in (
-            "projection", "random", "hdr", "rect", "cluster"
+            "projection", "random", "hdr", "rect", "cluster", "reflection"
         )
         for binding in constant_buffers
     ):
@@ -485,6 +495,7 @@ def fuzz_semantic_shader(
             texture_mips=texture_mips,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
+            structured_output_stride=structured_output_stride,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -515,6 +526,7 @@ def fuzz_semantic_shader(
             texture_mips=texture_mips,
             structured_inputs=structured_inputs,
             structured_output_elements=structured_output_elements,
+            structured_output_stride=structured_output_stride,
             samplers=samplers,
             constant_buffers=constant_buffers,
             output_kind=output_kind,
@@ -537,6 +549,7 @@ def fuzz_semantic_shader(
             "texture_mips": texture_mips,
             "structured_inputs": structured_inputs,
             "structured_output_elements": structured_output_elements,
+            "structured_output_stride": structured_output_stride,
             "samplers": samplers,
             "constant_buffers": constant_buffers,
             "output": output_kind,
