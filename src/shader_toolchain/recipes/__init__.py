@@ -51,6 +51,7 @@ from .main_billboard import apply_main_billboard_recipe
 from .main_block import apply_main_block_recipe
 from .main_character import apply_main_character_recipe
 from .main_particles import apply_main_particles_recipe
+from .main_voxel_terrain import apply_main_voxel_terrain_recipe
 from .main_text import apply_main_text_recipe
 from .main_slant import apply_main_slant_recipe
 from .main_terrain_surface import apply_main_terrain_surface_recipe
@@ -124,6 +125,7 @@ RECIPES = (
     apply_main_block_recipe,
     apply_main_character_recipe,
     apply_main_particles_recipe,
+    apply_main_voxel_terrain_recipe,
     apply_main_text_recipe,
     apply_main_slant_recipe,
     apply_main_terrain_surface_recipe,
