@@ -452,8 +452,14 @@ private:
         constants[53 * 4 + 1] = 1.0f;
         constants[54 * 4] = 1.0f - 0.5f / static_cast<float>(options_.width);
         constants[54 * 4 + 1] = 1.0f - 0.5f / static_cast<float>(options_.height);
+        constants[54 * 4 + 2] = constants[54 * 4];
+        constants[54 * 4 + 3] = constants[54 * 4 + 1];
+        constants[55 * 4] = constants[54 * 4];
+        constants[55 * 4 + 1] = constants[54 * 4 + 1];
         constants[56 * 4] = 1.0f;
         constants[56 * 4 + 1] = 1.0f;
+        constants[60 * 4] = 1.0f;
+        constants[60 * 4 + 1] = 1.0f;
         D3D11_SUBRESOURCE_DATA buffer_data{};
         buffer_data.pSysMem = constants.data();
         check(
