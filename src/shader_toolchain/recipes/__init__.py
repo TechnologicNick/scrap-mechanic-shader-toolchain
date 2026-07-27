@@ -1,5 +1,6 @@
 """Semantic shader recognition and lifting recipes."""
 
+from .copy_blend import apply_copy_blend_recipe
 from .copy_depth import apply_copy_depth_recipe
 from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
@@ -13,6 +14,7 @@ RECIPES = (
     apply_copy_downscale_recipe,
     apply_copy_depth_recipe,
     apply_copy_rgba_recipe,
+    apply_copy_blend_recipe,
 )
 
 
