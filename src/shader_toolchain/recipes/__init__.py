@@ -47,6 +47,7 @@ from .main_decals import apply_main_decals_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
 from .main_clutter import apply_main_clutter_recipe
 from .main_billboard import apply_main_billboard_recipe
+from .main_block import apply_main_block_recipe
 from .main_text import apply_main_text_recipe
 from .main_slant import apply_main_slant_recipe
 from .main_terrain_surface import apply_main_terrain_surface_recipe
@@ -116,6 +117,7 @@ RECIPES = (
     apply_main_clutter_impostor_recipe,
     apply_main_clutter_recipe,
     apply_main_billboard_recipe,
+    apply_main_block_recipe,
     apply_main_text_recipe,
     apply_main_slant_recipe,
     apply_main_terrain_surface_recipe,
