@@ -298,7 +298,9 @@ corpus or the maintained semantic HLSL.
 
 `ssgi_cascade.hlsl` recovers the cascade's normalized 16-bit 6:5:5 YCoCg
 indirect-light codec and its plane/distance-aware bilateral rejection as typed
-helpers. Its differential fixture uses spatially varying 8x8 inputs with
+helpers. Repeated four-lane Gather decoding is represented by `CascadeQuad`,
+and each filtered neighborhood is a single `CascadeContribution` containing
+its indirect light and accumulated weight. Its differential fixture uses spatially varying 8x8 inputs with
 independent channels, preserves the native/HLSL Gather lane mapping, and adds
 explicit far-depth cases. Run both the bit-exact campaign and its path canaries:
 

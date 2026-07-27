@@ -59,7 +59,9 @@ The semantic corpus has two deliberate readability levels:
   algorithms as typed helpers while retaining instruction order in the
   pass-specific orchestration. `ssgi_cascade` uses this level for its 6:5:5
   YCoCg codec, depth representation, view-position reconstruction, and
-  plane/distance-aware bilateral weights.
+  plane/distance-aware bilateral weights. Its 36 repeated four-lane decode
+  clusters are lifted into 32 typed filtered-neighborhood contributions and
+  four center-sample quads.
 - Instruction-ordered semantic implementations preserve the recovered
   arithmetic sequence but replace anonymous register state with stable domain
   names and document the algorithm phases. This applies to the largest or most
@@ -112,10 +114,10 @@ footprint order, scaled versus unscaled UVs, normal rejection, and parent-level
 offsets are observable. A dedicated fixture supplies valid cascade depths and
 periodic far-depth inputs. The four selectors pass 256 cases bit-exactly
 (131,072 compared values), and compile-time canaries prove the packed decoder,
-bilateral helper, far-depth exit, packed encoder where applicable, and each
-downsample/final/upscale pass are reached.
+typed cascade contribution, bilateral helper, far-depth exit, packed encoder
+where applicable, and each downsample/final/upscale pass are reached.
 The integration corpus digest for this audit is
-`ec36afba68cb0791ab71e4a891a32f4f1829e6d740c99997ac5ee9866e0ba472`.
+`b5f7b9c1d6c08f964a119a7df40d82bedbf3411d453e91826384890ae170df38`.
 Two independent forced 32-worker builds compiled all 4,141 selectors with zero
 fallbacks and produced identical caches with SHA-256
 `7ffde1f127c83ce413d802fc5329cfcb5d6b762bb524a1b8f0e4df884d87b118`.

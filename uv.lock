@@ -65,7 +65,7 @@ wheels = [
 
 [[package]]
 name = "scrap-mechanic-shader-toolchain"
-version = "0.6.3"
+version = "0.6.4"
 source = { editable = "." }
 dependencies = [
     { name = "tqdm" },
