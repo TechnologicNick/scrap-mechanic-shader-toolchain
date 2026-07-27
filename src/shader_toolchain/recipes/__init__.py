@@ -13,6 +13,7 @@ from .copy_depth_rect_to_color import apply_copy_depth_rect_to_color_recipe
 from .copy_downscale import apply_copy_downscale_recipe
 from .copy_rgba import apply_copy_rgba_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
+from .gui_blurry_background import apply_gui_blurry_background_recipe
 from .post_blur import apply_post_blur_recipe
 from .post_downsample import apply_post_downsample_recipe
 from .post_fxaa import apply_post_fxaa_recipe
@@ -41,6 +42,7 @@ RECIPES = (
     apply_copy_auto_hdr_recipe,
     apply_copy_clouds_recipe,
     apply_gui_silhouette_recipe,
+    apply_gui_blurry_background_recipe,
 )
 
 
