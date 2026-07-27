@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -22,6 +23,19 @@ from ..sbc import D3DCompiler
 
 
 PROFILES = {"vertex": "vs_5_0", "pixel": "ps_5_0", "compute": "cs_5_0"}
+
+
+def rename_register_state(
+    source: str, names: dict[int, str], *, note: str
+) -> str:
+    """Replace anonymous decompiler registers with stable domain state names."""
+    for index in sorted(names, reverse=True):
+        source = re.sub(rf"\br{index}\b", names[index], source)
+    source = source.replace(
+        "  uint4 bitmask, uiDest;\n  float4 fDest;\n",
+        f"  // {note}\n",
+    )
+    return source
 
 
 def semantic_worker_count(task_count: int) -> int:

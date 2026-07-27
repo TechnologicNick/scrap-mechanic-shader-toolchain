@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..hlsl import module_variants
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -35,6 +35,23 @@ to compiler scheduling and contraction.
 """
 
 
+REGISTER_NAMES = {
+    0: "positionAndMaterialState",
+    1: "instanceTransformState",
+    2: "normalAndTangentState",
+    3: "groundAlignmentState",
+    4: "windDeformationState",
+    5: "pusherDeformationState",
+    6: "textureSampleState",
+    7: "foliageMaterialState",
+    8: "lightCapState",
+    9: "encodedNormalState",
+    10: "surfaceDerivativeState",
+    11: "gbufferOutputState",
+    12: "clutterScratch",
+}
+
+
 def apply_main_clutter_recipe(
     staging: Path,
     records: list[dict[str, Any]],
@@ -50,7 +67,10 @@ def apply_main_clutter_recipe(
         definitions,
     )
     bodies = {
-        shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
+        shader["selector"]: SEMANTIC_PHASE_MAP + rename_register_state(
+            expanded[shader["selector"]], REGISTER_NAMES,
+            note="Instruction ordering preserves wind, pusher, and alpha behavior.",
+        )
         for shader in shaders
     }
     executions = {}
