@@ -8,7 +8,7 @@ from typing import Any
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
-from .common import emit_validated_module
+from .common import emit_validated_module, rename_register_state
 
 
 SEMANTIC_PHASE_MAP = """
@@ -24,6 +24,19 @@ The 162 feature permutations retain instruction ordering for gather lanes,
 cascade transforms, packed material tests and temporal rejection thresholds.
 */
 """
+
+
+REGISTER_NAMES = {
+    0: "cascadeAddressState", 1: "viewDepthState",
+    2: "normalDecodeState", 3: "cascadeSelectionState",
+    4: "sampleCoordinateState", 5: "depthGatherState",
+    6: "normalGatherState", 7: "indirectGatherState",
+    8: "aoGatherState", 9: "subsurfaceGatherState",
+    10: "edgeRejectionState", 11: "bilateralWeightState",
+    12: "temporalRejectionState", 13: "weightedIndirectState",
+    14: "weightedAoState", 15: "cascadeOutputState",
+    16: "cascadeUpscaleScratch",
+}
 
 
 def _execution(blob: bytes) -> dict[str, Any]:
@@ -92,7 +105,10 @@ def apply_indirect_cascade_upscale_recipe(
             r"cb_arrCascades[\1].\2",
             source,
         )
-        variants[selector] = source
+        variants[selector] = rename_register_state(
+            source, REGISTER_NAMES,
+            note="Cascade gathers and rejection weights retain DXBC order.",
+        )
     return emit_validated_module(
         staging,
         shaders,
