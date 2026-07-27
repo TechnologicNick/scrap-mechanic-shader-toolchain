@@ -344,9 +344,16 @@ def hlsl_token_sha256(source: str) -> str:
     return digest.hexdigest()
 
 
-def resolve_local_includes(source: str, source_path: Path, root: Path) -> str:
+def resolve_local_includes(
+    source: str,
+    source_path: Path,
+    root: Path,
+    _stack: frozenset[Path] | None = None,
+) -> str:
     """Inline quoted includes while preventing paths from escaping the corpus."""
     root = root.resolve()
+    source_path = source_path.resolve()
+    stack = (_stack or frozenset()) | {source_path}
 
     def replace(match: re.Match[str]) -> str:
         include = (source_path.parent / match.group(1)).resolve()
@@ -356,7 +363,9 @@ def resolve_local_includes(source: str, source_path: Path, root: Path) -> str:
             raise HlslFormatError(f"include escapes semantic root: {match.group(1)}") from error
         if not include.is_file():
             raise HlslFormatError(f"semantic include does not exist: {match.group(1)}")
+        if include in stack:
+            raise HlslFormatError(f"cyclic semantic include: {match.group(1)}")
         included = include.read_text(encoding="utf-8")
-        return resolve_local_includes(included, include, root).rstrip()
+        return resolve_local_includes(included, include, root, stack).rstrip()
 
     return LOCAL_INCLUDE.sub(replace, source)

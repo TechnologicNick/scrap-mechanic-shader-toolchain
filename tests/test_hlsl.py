@@ -55,3 +55,13 @@ def test_local_include_resolver_rejects_escape(tmp_path) -> None:
 
     with pytest.raises(HlslFormatError, match="escapes semantic root"):
         resolve_local_includes('#include "../outside.hlsl"\n', module, root)
+
+
+def test_local_include_resolver_rejects_cycles(tmp_path) -> None:
+    root = tmp_path / "semantic"
+    root.mkdir()
+    module = root / "shader.hlsl"
+    module.write_text('#include "shader.hlsl"\n')
+
+    with pytest.raises(HlslFormatError, match="cyclic semantic include"):
+        resolve_local_includes(module.read_text(), module, root)
