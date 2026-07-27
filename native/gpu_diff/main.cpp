@@ -28,6 +28,7 @@ enum class ConstantProfile {
     rect,
     cluster,
     reflection,
+    bloom,
 };
 
 struct ConstantBinding {
@@ -168,8 +169,9 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "rect") return ConstantProfile::rect;
     if (profile == "cluster") return ConstantProfile::cluster;
     if (profile == "reflection") return ConstantProfile::reflection;
+    if (profile == "bloom") return ConstantProfile::bloom;
     throw std::runtime_error(
-        "constant profile must be projection, random, hdr, rect, cluster, or reflection");
+        "constant profile must be projection, random, hdr, rect, cluster, reflection, or bloom");
 }
 
 const char* constant_profile_name(ConstantProfile profile) {
@@ -180,6 +182,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::rect: return "rect";
     case ConstantProfile::cluster: return "cluster";
     case ConstantProfile::reflection: return "reflection";
+    case ConstantProfile::bloom: return "bloom";
     }
     return "unknown";
 }
@@ -596,6 +599,17 @@ public:
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
             std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::bloom) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            float* bloom = constants.data() + 570 * 4;
+            bloom[0] = case_index == 0 ? 0.2f : random.unit() * 0.5f;
+            bloom[1] = case_index == 0 ? 0.8f : bloom[0] + random.unit() * 1.5f;
+            bloom[2] = case_index == 0 ? 0.1f : random.unit() * 0.5f;
+            bloom[3] = case_index == 0 ? 0.8f : 0.05f + random.unit() * 2.0f;
+            bloom[4] = case_index == 0 ? 1.0f : random.unit() * 4.0f;
+            bloom[5] = case_index == 0 ? 2.0f : random.unit() * 6.0f;
+            bloom[6] = case_index == 0 ? 0.01f : 0.0001f + random.unit() * 0.1f;
         } else if (profile == ConstantProfile::reflection) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};

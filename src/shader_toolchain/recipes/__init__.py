@@ -1,6 +1,7 @@
 """Semantic shader recognition and lifting recipes."""
 
 from .bloom_downres import apply_bloom_downres_recipe
+from .bloom_first_downres import apply_bloom_first_downres_recipe
 from .bloom_last_upres import apply_bloom_last_upres_recipe
 from .bloom_upres import apply_bloom_upres_recipe
 from .bloom_upres_depth import apply_bloom_upres_depth_recipe
@@ -57,6 +58,7 @@ RECIPES = (
     apply_post_resolve_transparency_recipe,
     apply_blur_down_res_recipe,
     apply_bloom_downres_recipe,
+    apply_bloom_first_downres_recipe,
     apply_bloom_upres_recipe,
     apply_post_downsample_recipe,
     apply_bloom_last_upres_recipe,
