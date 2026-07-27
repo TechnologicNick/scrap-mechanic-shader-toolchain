@@ -115,10 +115,10 @@ by a decompiler, but it cannot be the exact original source.
 
 ## Extractor
 
-Run the checked-in extractor on Windows:
+Run the checked-in extractor on Windows with uv:
 
 ```powershell
-python apps/game-runtime/scripts/extract-shaders-sbc.py `
+uv run python -m shader_toolchain.sbc `
   "C:\Program Files (x86)\Steam\steamapps\common\Scrap Mechanic\Cache\Shaders\Release\shaders.sbc" `
   --output .data/shaders-recovered `
   --extract-dxbc --disassemble
@@ -127,3 +127,21 @@ python apps/game-runtime/scripts/extract-shaders-sbc.py `
 It uses a built-in raw-LZ4 decoder and the system `d3dcompiler_47.dll`. The
 output contains `summary.json`, complete `metadata.json`, the `BSCD` bundle,
 4,141 `.dxbc` files, and 4,141 `.asm` files. `.data` is ignored by Git.
+
+## Deterministic HLSL reconstruction
+
+The higher-level command decompresses the same DXBC programs, disassembles them,
+lifts them with the pinned decompiler submodules, and groups each permutation
+under its recovered source stem:
+
+```powershell
+uv run sm-shaders reconstruct path\to\shaders.sbc output
+uv run sm-shaders verify output
+```
+
+The validated cache becomes exactly 80 `.hlsl` modules. A generated
+`SM_SHADER_<key>` preprocessor selector identifies each of the 4,141 variants;
+the manifest preserves the complete mapping back to cache metadata and exact
+DXBC hashes. Normalization removes decompiler timestamps and repairs mechanical
+compute-signature defects using the authoritative DXBC thread-group declaration,
+making repeated runs byte-for-byte reproducible.
