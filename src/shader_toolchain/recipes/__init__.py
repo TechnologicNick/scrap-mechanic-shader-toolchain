@@ -54,6 +54,7 @@ from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
 from .post_depth_to_pushmap import apply_post_depth_to_pushmap_recipe
 from .post_fxaa import apply_post_fxaa_recipe
+from .post_godrays import apply_post_godrays_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
 from .post_sky import apply_post_sky_recipe
 from .post_smaa import apply_post_smaa_recipe
@@ -65,6 +66,7 @@ from .ssgi_denoise import apply_ssgi_denoise_recipe
 
 RECIPES = (
     apply_post_fxaa_recipe,
+    apply_post_godrays_recipe,
     apply_post_blur_recipe,
     apply_copy_downscale_recipe,
     apply_copy_depth_recipe,
