@@ -406,6 +406,12 @@ public:
                 value = random.unit() * 4.0f - 2.0f;
             }
         } else if (profile == ConstantProfile::projection) {
+            std::memcpy(
+                &constants[51 * 4], &options_.width, sizeof(options_.width));
+            std::memcpy(
+                &constants[51 * 4 + 1],
+                &options_.height,
+                sizeof(options_.height));
             constants[51 * 4 + 2] = 1.0f / static_cast<float>(options_.width);
             constants[51 * 4 + 3] = 1.0f / static_cast<float>(options_.height);
             constants[52 * 4] = 1.0f / static_cast<float>(options_.width);
