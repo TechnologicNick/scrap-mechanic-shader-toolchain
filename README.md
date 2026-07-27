@@ -302,8 +302,10 @@ helpers. Repeated four-lane Gather decoding is represented by `CascadeQuad`,
 and each filtered neighborhood is a single `CascadeContribution` containing
 its indirect light and accumulated weight. Each pass now builds one
 `CascadeFilterContext` and evaluates eight spatially named perimeter taps with
-`GatherCascadeNeighborhood`; depth reconstruction, bilateral rejection, packed
-light decoding, and accumulation no longer remain expanded in the shader body.
+`FilterCascadePerimeter`. Center Gather reduction, minimum-depth selection,
+view-position reconstruction, octahedral normal decoding, bilateral rejection,
+packed-light decoding, accumulation, and parent range compression no longer
+remain expanded in the shader body.
 Its differential fixture uses spatially varying 8x8 inputs with
 independent channels, preserves the native/HLSL Gather lane mapping, and adds
 explicit far-depth cases. Run both the bit-exact campaign and its path canaries:

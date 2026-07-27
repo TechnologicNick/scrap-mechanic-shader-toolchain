@@ -62,9 +62,11 @@ The semantic corpus has two deliberate readability levels:
   plane/distance-aware bilateral weights. Its 36 repeated four-lane decode
   clusters are lifted into 32 typed filtered-neighborhood contributions and
   four center-sample quads. The complete Gather/depth/bilateral/decode operation
-  is shared by all 32 spatially named taps, reducing the maintained semantic
-  module from 1,618 to 987 lines with no raw neighborhood Gathers or inline
-  bilateral expansions left in the four pass bodies.
+  is shared by all 32 taps through one fixed, unrolled perimeter filter. Center
+  reduction, minimum depth, view reconstruction, normal decoding, far checks,
+  and parent range compression are also typed operations. Together these lifts
+  reduce the maintained semantic module from 1,618 to 562 lines, with no raw
+  neighborhood Gathers or inline bilateral expansions left in the pass bodies.
 - Instruction-ordered semantic implementations preserve the recovered
   arithmetic sequence but replace anonymous register state with stable domain
   names and document the algorithm phases. This applies to the largest or most
@@ -117,11 +119,11 @@ footprint order, scaled versus unscaled UVs, normal rejection, and parent-level
 offsets are observable. A dedicated fixture supplies valid cascade depths and
 periodic far-depth inputs. The four selectors pass 256 cases bit-exactly
 (131,072 compared values), and compile-time canaries prove the packed decoder,
-typed cascade contribution, contribution accumulator, bilateral helper,
-far-depth exit, packed encoder where applicable, and each
+typed cascade contribution, contribution accumulator, complete perimeter,
+bilateral helper, far-depth exit, packed encoder where applicable, and each
 downsample/final/upscale pass are reached.
 The integration corpus digest for this audit is
-`d8f912c5e354bf354c2c3d6c92af9e900b07c8d9d7f16cfd0c67979bd2a85d46`.
+`978401818cb527933a28f1d0bdecb2e915ed9df058f55f38bd82bdee731d770d`.
 Two independent forced 32-worker builds compiled all 4,141 selectors with zero
 fallbacks and produced identical caches with SHA-256
 `7ffde1f127c83ce413d802fc5329cfcb5d6b762bb524a1b8f0e4df884d87b118`.
