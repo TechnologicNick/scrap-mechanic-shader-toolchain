@@ -37,6 +37,7 @@ from .post_downsample import apply_post_downsample_recipe
 from .post_dof import apply_post_dof_recipe
 from .post_fxaa import apply_post_fxaa_recipe
 from .post_resolve_transparency import apply_post_resolve_transparency_recipe
+from .post_sky import apply_post_sky_recipe
 from .save_paused import apply_save_paused_recipe
 from .upres_clouds import apply_upres_clouds_recipe
 
@@ -81,6 +82,7 @@ RECIPES = (
     apply_cube_map_blend_recipe,
     apply_cube_map_composition_recipe,
     apply_cube_map_face_composition_recipe,
+    apply_post_sky_recipe,
 )
 
 

@@ -560,9 +560,11 @@ public:
         }
     }
 
-    std::array<float, 62 * 4> constant_values(
+    static constexpr size_t constant_register_count = 574;
+
+    std::array<float, constant_register_count * 4> constant_values(
         ConstantProfile profile, uint32_t case_index) const {
-        std::array<float, 62 * 4> constants{};
+        std::array<float, constant_register_count * 4> constants{};
         if (profile == ConstantProfile::cluster) {
             const uint32_t slice_size = std::min(options_.width, 64u);
             const uint32_t depth_lights = 2;
@@ -997,7 +999,7 @@ private:
         }
 
         D3D11_BUFFER_DESC buffer_description{};
-        buffer_description.ByteWidth = 62 * 16;
+        buffer_description.ByteWidth = constant_register_count * 16;
         buffer_description.Usage = D3D11_USAGE_DEFAULT;
         buffer_description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         for (const ConstantBinding& binding : options_.constant_buffers) {
