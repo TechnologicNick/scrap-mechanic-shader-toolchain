@@ -37,6 +37,7 @@ enum class ConstantProfile {
     index,
     auto_hdr,
     cloud,
+    cluster_culling,
 };
 
 struct ConstantBinding {
@@ -215,6 +216,7 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "index") return ConstantProfile::index;
     if (profile == "auto-hdr") return ConstantProfile::auto_hdr;
     if (profile == "cloud") return ConstantProfile::cloud;
+    if (profile == "cluster-culling") return ConstantProfile::cluster_culling;
     throw std::runtime_error(
         "unsupported constant-buffer profile");
 }
@@ -244,6 +246,7 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::index: return "index";
     case ConstantProfile::auto_hdr: return "auto-hdr";
     case ConstantProfile::cloud: return "cloud";
+    case ConstantProfile::cluster_culling: return "cluster-culling";
     }
     return "unknown";
 }
@@ -894,6 +897,15 @@ public:
                 record[22] = random.unit() * 20.0f;
                 record[23] = 0.001f + random.unit() * 2.0f;
             }
+        } else if (profile == ConstantProfile::cluster_culling) {
+            const uint32_t first_light = 0;
+            const uint32_t one_light = 1;
+            std::memcpy(&constants[4], &first_light, sizeof(first_light));
+            std::memcpy(&constants[5], &one_light, sizeof(one_light));
+            constants[90 * 4 + 0] = 0.0f;
+            constants[90 * 4 + 1] = 0.0f;
+            constants[90 * 4 + 2] = 0.0f;
+            constants[90 * 4 + 3] = 1.0e12f;
         } else if (profile == ConstantProfile::cloud) {
             SplitMix64 random{
                 options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
