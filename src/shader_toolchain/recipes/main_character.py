@@ -61,6 +61,18 @@ REGISTER_NAMES_BY_MODULE = {
         16: "gbufferAndPreviewState", 17: "effectOutputState",
         18: "characterScratch",
     },
+    "main_part": {
+        0: "partPositionState", 1: "animationTransformState",
+        2: "viewProjectionState", 3: "normalAndTangentState",
+        4: "materialCoordinateState", 5: "effectAnimationState",
+        6: "materialSampleState", 7: "profileMaterialState",
+        8: "clusterMaskState", 9: "lightIteratorState",
+        10: "lightGeometryState", 11: "attenuationAndCookieState",
+        12: "shadowState", 13: "reflectionAndRefractionState",
+        14: "directLightAccumulator", 15: "transmissionState",
+        16: "forwardAndBehindState", 17: "gbufferAndPreviewState",
+        18: "partScratch",
+    },
 }
 
 
