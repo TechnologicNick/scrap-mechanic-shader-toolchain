@@ -25,6 +25,7 @@ from .copy_to_shadow_atlas import apply_copy_to_shadow_atlas_recipe
 from .cube_map_face_present import apply_cube_map_face_present_recipe
 from .cube_map_blend import apply_cube_map_blend_recipe
 from .cube_map_composition import apply_cube_map_composition_recipe
+from .cube_map_face_composition import apply_cube_map_face_composition_recipe
 from .gui_silhouette import apply_gui_silhouette_recipe
 from .gui import apply_gui_recipe
 from .gui_blurry_background import apply_gui_blurry_background_recipe
@@ -79,6 +80,7 @@ RECIPES = (
     apply_cmp_fft_butterfly_shared_recipe,
     apply_cube_map_blend_recipe,
     apply_cube_map_composition_recipe,
+    apply_cube_map_face_composition_recipe,
 )
 
 
