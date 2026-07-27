@@ -99,6 +99,7 @@ struct Options {
     uint64_t seed = 0x534D465841413031ull;
     double absolute_tolerance = 0.0;
     double relative_tolerance = 0.0;
+    uint32_t ulp_tolerance = 0;
     std::vector<TextureBinding> textures = {{0, TextureKind::two_d, 1}};
     std::vector<StructuredInputBinding> structured_inputs;
     uint32_t structured_output_elements = 0;
@@ -301,6 +302,8 @@ Options parse_options(int argc, char** argv) {
             options.absolute_tolerance = parse_double(value());
         } else if (name == "--relative-tolerance") {
             options.relative_tolerance = parse_double(value());
+        } else if (name == "--ulp-tolerance") {
+            options.ulp_tolerance = static_cast<uint32_t>(parse_u64(value()));
         } else if (name == "--texture-slot") {
             options.textures = {{
                 static_cast<uint32_t>(parse_u64(value())), TextureKind::two_d, 1}};
@@ -1499,6 +1502,7 @@ Comparison compare_outputs(
     const std::vector<float>& candidate,
     double absolute_tolerance,
     double relative_tolerance,
+    uint32_t ulp_tolerance,
     size_t components_per_pixel) {
     Comparison result;
     result.compared_values = baseline.size();
@@ -1538,7 +1542,8 @@ Comparison compare_outputs(
         result.max_relative_error = std::max(result.max_relative_error, relative);
         result.max_ulp_error = std::max(result.max_ulp_error, ulp);
         const bool finite_match = std::isfinite(first) && std::isfinite(second)
-            && absolute <= absolute_tolerance + relative_tolerance * scale;
+            && (ulp <= ulp_tolerance
+                || absolute <= absolute_tolerance + relative_tolerance * scale);
         if (!finite_match) {
             result.passed = false;
             ++result.differing_values;
@@ -1606,6 +1611,7 @@ void preserve_failure(
            << "  \"height\": " << options.height << ",\n"
            << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
            << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+           << "  \"ulp_tolerance\": " << options.ulp_tolerance << ",\n"
            << "  \"output\": \""
            << (options.depth_output ? "depth" : "color") << "\",\n"
            << "  \"max_absolute_error\": " << comparison.max_absolute_error << ",\n"
@@ -1711,6 +1717,7 @@ int main(int argc, char** argv) {
                 candidate,
                 options.absolute_tolerance,
                 options.relative_tolerance,
+                options.ulp_tolerance,
                 options.output_components);
             ++tested_cases;
             exact_values += comparison.exact_values;
@@ -1756,6 +1763,7 @@ int main(int argc, char** argv) {
                   << "  \"dispatch_height\": " << options.dispatch_height << ",\n"
                   << "  \"absolute_tolerance\": " << options.absolute_tolerance << ",\n"
                   << "  \"relative_tolerance\": " << options.relative_tolerance << ",\n"
+                  << "  \"ulp_tolerance\": " << options.ulp_tolerance << ",\n"
                   << "  \"texture_slots\": [";
         for (size_t index = 0; index < options.textures.size(); ++index) {
             if (index != 0) {

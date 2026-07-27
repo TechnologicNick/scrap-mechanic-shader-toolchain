@@ -80,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     fuzz_parser.add_argument("--height", type=int, default=64)
     fuzz_parser.add_argument("--absolute-tolerance", type=float, default=0.0)
     fuzz_parser.add_argument("--relative-tolerance", type=float, default=0.0)
+    fuzz_parser.add_argument("--ulp-tolerance", type=int, default=0)
     fuzz_parser.add_argument(
         "--failure-dir", type=Path, default=Path("gpu-fuzz-failure")
     )
@@ -143,6 +144,7 @@ def main() -> int:
                 height=args.height,
                 absolute_tolerance=args.absolute_tolerance,
                 relative_tolerance=args.relative_tolerance,
+                ulp_tolerance=args.ulp_tolerance,
                 failure_dir=args.failure_dir,
                 harness=args.harness,
                 warp=args.warp,

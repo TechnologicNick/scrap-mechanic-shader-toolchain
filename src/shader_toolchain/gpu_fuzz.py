@@ -44,6 +44,30 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 }
 """
 
+DECALS_VERTEX = """
+struct HarnessVertexOutput
+{
+    float4 position : SV_Position0;
+    noperspective centroid float2 screenUv : TEXCOORD0;
+    nointerpolation uint decalIndex : INDEX0;
+};
+
+HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
+{
+    static const float2 positions[3] = {
+        float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)
+    };
+    static const float2 coordinates[3] = {
+        float2(0.0, 1.0), float2(2.0, 1.0), float2(0.0, -1.0)
+    };
+    HarnessVertexOutput output;
+    output.position = float4(positions[vertexId], 0.0, 1.0);
+    output.screenUv = coordinates[vertexId];
+    output.decalIndex = 0;
+    return output;
+}
+"""
+
 FULLSCREEN_GUI_VERTEX = """
 struct HarnessVertexOutput
 {
@@ -364,6 +388,7 @@ HarnessVertexOutput harnessVS(uint vertexId : SV_VertexID0)
 
 VERTEX_HARNESSES = {
     "fullscreen_uv": FULLSCREEN_UV_VERTEX,
+    "decals": DECALS_VERTEX,
     "fullscreen_gui": FULLSCREEN_GUI_VERTEX,
     "fullscreen_debug": FULLSCREEN_DEBUG_VERTEX,
     "fullscreen_line": FULLSCREEN_LINE_VERTEX,
@@ -479,6 +504,7 @@ def _invoke_harness(
     dispatch_height: int,
     absolute_tolerance: float,
     relative_tolerance: float,
+    ulp_tolerance: int,
     texture_slots: list[int],
     texture_kinds: list[str],
     texture_mips: list[int],
@@ -521,6 +547,8 @@ def _invoke_harness(
         str(absolute_tolerance),
         "--relative-tolerance",
         str(relative_tolerance),
+        "--ulp-tolerance",
+        str(ulp_tolerance),
         "--textures",
         ",".join(
             f"{slot}:{kind}:{mips}:{slices}"
@@ -593,6 +621,7 @@ def fuzz_semantic_shader(
     height: int = 64,
     absolute_tolerance: float = 0.0,
     relative_tolerance: float = 0.0,
+    ulp_tolerance: int = 0,
     failure_dir: Path | None = None,
     harness: Path | None = None,
     warp: bool = False,
@@ -603,6 +632,8 @@ def fuzz_semantic_shader(
         raise ToolchainError("cases, width, and height must be positive")
     if absolute_tolerance < 0 or relative_tolerance < 0:
         raise ToolchainError("comparison tolerances must be non-negative")
+    if ulp_tolerance < 0:
+        raise ToolchainError("ULP tolerance must be non-negative")
     if verify_corpus:
         verify_output(corpus, verify_hlsl_fingerprints=False)
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
@@ -621,6 +652,7 @@ def fuzz_semantic_shader(
         vertex, shader = select_shader_pair(manifest, source_name, pixel_selector)
         shader_stage = "pixel"
     execution = shader.get("semantic_execution", {})
+    ulp_tolerance = int(execution.get("ulp_tolerance", ulp_tolerance))
     width = int(execution.get("width", width))
     height = int(execution.get("height", height))
     dispatch_width = int(execution.get("dispatch_width", width))
@@ -805,6 +837,7 @@ def fuzz_semantic_shader(
             dispatch_height=dispatch_height,
             absolute_tolerance=0.0,
             relative_tolerance=0.0,
+            ulp_tolerance=0,
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
@@ -838,6 +871,7 @@ def fuzz_semantic_shader(
             dispatch_height=dispatch_height,
             absolute_tolerance=absolute_tolerance,
             relative_tolerance=relative_tolerance,
+            ulp_tolerance=ulp_tolerance,
             texture_slots=texture_slots,
             texture_kinds=texture_kinds,
             texture_mips=texture_mips,
@@ -879,6 +913,7 @@ def fuzz_semantic_shader(
             "thread_group": thread_group,
             "dispatch_width": dispatch_width,
             "dispatch_height": dispatch_height,
+            "ulp_tolerance": ulp_tolerance,
         },
         "baseline_dxbc_sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         "candidate_dxbc_sha256": hashlib.sha256(candidate).hexdigest(),

@@ -41,6 +41,7 @@ from .gui_texture_3d import apply_gui_texture_3d_recipe
 from .gui_texture_box_array import apply_gui_texture_box_array_recipe
 from .indirect_temporal import apply_indirect_temporal_recipe
 from .main_debug_drawer import apply_main_debug_drawer_recipe
+from .main_decals import apply_main_decals_recipe
 from .main_clutter_impostor import apply_main_clutter_impostor_recipe
 from .main_billboard import apply_main_billboard_recipe
 from .main_text import apply_main_text_recipe
@@ -100,6 +101,7 @@ RECIPES = (
     apply_cmp_water_init_spectrum_recipe,
     apply_post_dof_recipe,
     apply_main_debug_drawer_recipe,
+    apply_main_decals_recipe,
     apply_main_clutter_impostor_recipe,
     apply_main_billboard_recipe,
     apply_main_text_recipe,
