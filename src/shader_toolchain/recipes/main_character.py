@@ -35,6 +35,20 @@ indices, comparison gathers, approximate normalization, and DXBC contraction.
 
 
 REGISTER_NAMES_BY_MODULE = {
+    "main_asset": {
+        0: "assetPositionState", 1: "animationTransformState",
+        2: "viewProjectionState", 3: "normalAndTangentState",
+        4: "materialCoordinateState", 5: "effectAnimationState",
+        6: "diffuseSampleState", 7: "asgAndNormalSampleState",
+        8: "profileMaterialState", 9: "clusterMaskState",
+        10: "lightIteratorState", 11: "lightGeometryState",
+        12: "attenuationState", 13: "cookieProjectionState",
+        14: "shadowProjectionState", 15: "shadowFilterState",
+        16: "reflectionState", 17: "refractionState",
+        18: "transmissionState", 19: "directLightAccumulator",
+        20: "forwardAndBehindState", 21: "gbufferAndPreviewState",
+        22: "effectOutputState", 23: "assetScratch",
+    },
     "main_character": {
         0: "characterPositionState", 1: "skinWeightState",
         2: "boneTransformState", 3: "viewProjectionState",
