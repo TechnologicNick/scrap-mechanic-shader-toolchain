@@ -1219,6 +1219,104 @@ def _prune_unused_cascade_state(source: str) -> str:
     return source[: match.start()] + declaration + source[match.end() :]
 
 
+def _lift_typed_cascade_vectors(source: str) -> str:
+    """Separate three/four-component domain values from packed scratch lanes."""
+    declaration = re.search(r"(?m)^  float4 [^;]+;$", source)
+    if declaration is None:
+        return source
+
+    if "// SM_COVERAGE_CANARY: parent_upscale" in source:
+        replacements = (
+            ("packedIndirectState.xyzw", "parentDepths"),
+            ("packedIndirectState.xz", "parentDepths.xz"),
+            ("packedIndirectState.yw", "parentDepths.yw"),
+            ("normalDecodeState.xyzw", "filterParameters"),
+            ("packedIndirectState.xyz", "filteredIndirect"),
+            ("packedIndirectState.yzw", "cascadeIndirect"),
+            ("centerDepthState.xyz", "centerIndirect"),
+            ("neighborhoodDepthA.xyz", "centerPosition"),
+            ("neighborhoodDepthB.xyz", "viewDirection"),
+            ("normalDecodeState.xyz", "filterCenter"),
+            (
+                "float3(normalDecodeState.x, normalDecodeState.y, "
+                "normalDecodeState.z)",
+                "filterCenter",
+            ),
+            (
+                "float3(-neighborhoodDepthB.x, -neighborhoodDepthB.y, "
+                "-neighborhoodDepthB.z)",
+                "-viewDirection",
+            ),
+        )
+        typed = (
+            "  float4 parentDepths, filterParameters;\n"
+            "  float3 centerIndirect, centerPosition, viewDirection, "
+            "filterCenter, cascadeIndirect, filteredIndirect;"
+        )
+    elif "// SM_COVERAGE_CANARY: final_resolve" in source:
+        replacements = (
+            ("packedIndirectState.yzw", "cascadeIndirect"),
+            ("sampleCoordinateState.xyz", "centerPosition"),
+            ("centerDepthState.xyz", "surfaceNormal"),
+            (
+                "float3(sampleCoordinateState.x, sampleCoordinateState.y, "
+                "sampleCoordinateState.z)",
+                "centerPosition",
+            ),
+            (
+                "float3(centerDepthState.x, centerDepthState.y, "
+                "centerDepthState.z)",
+                "surfaceNormal",
+            ),
+        )
+        typed = "  float3 cascadeIndirect, centerPosition, surfaceNormal;"
+    elif "tNormal.SampleLevel" in source:
+        replacements = (
+            ("packedIndirectState.yzw", "cascadeIndirect"),
+            ("centerDepthState.xyz", "centerPosition"),
+            ("sampleCoordinateState.yzw", "surfaceNormal"),
+            (
+                "float3(centerDepthState.x, centerDepthState.y, "
+                "centerDepthState.z)",
+                "centerPosition",
+            ),
+            (
+                "float3(sampleCoordinateState.y, sampleCoordinateState.z, "
+                "sampleCoordinateState.w)",
+                "surfaceNormal",
+            ),
+        )
+        typed = "  float3 cascadeIndirect, centerPosition, surfaceNormal;"
+    else:
+        replacements = (
+            ("packedIndirectState.yzw", "cascadeIndirect"),
+            ("centerDepthState.xyz", "centerPosition"),
+            ("sampleCoordinateState.yzw", "viewDirection"),
+            (
+                "float3(centerDepthState.x, centerDepthState.y, "
+                "centerDepthState.z)",
+                "centerPosition",
+            ),
+            (
+                "float3(-sampleCoordinateState.y, -sampleCoordinateState.z, "
+                "-sampleCoordinateState.w)",
+                "-viewDirection",
+            ),
+        )
+        typed = "  float3 cascadeIndirect, centerPosition, viewDirection;"
+
+    for packed, semantic in replacements:
+        source = source.replace(packed, semantic)
+    if "// SM_COVERAGE_CANARY: parent_upscale" in source:
+        source = source.replace("normalDecodeState.", "filterParameters.")
+    if "parentDepths" in source:
+        source = re.sub(
+            r"(parentDepths = [^;\n]+)\.xyzw;", r"\1;", source
+        )
+    insertion = declaration.end()
+    return source[:insertion] + "\n" + typed + source[insertion:]
+
+
 def _execution(blob: bytes) -> dict[str, Any]:
     abi = ShaderReflector().abi(blob)
     textures = [resource for resource in abi["resources"] if resource["type"] == 2]
@@ -1318,7 +1416,8 @@ def apply_ssgi_cascade_recipe(
             1,
         )
         variants[selector] = _prune_unused_cascade_state(
-            _compact_cascade_entrypoint(
+            _lift_typed_cascade_vectors(
+                _compact_cascade_entrypoint(
                 _lift_far_depth_checks(
                     _lift_view_positions_and_normals(
                         _lift_parent_range_encode(
@@ -1343,6 +1442,7 @@ def apply_ssgi_cascade_recipe(
                             )
                         )
                     )
+                )
                 )
             )
         )

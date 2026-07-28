@@ -4,6 +4,7 @@ from shader_toolchain.recipes.ssgi_cascade import (
     _lift_cascade_accumulations,
     _lift_cascade_neighborhood_gathers,
     _lift_cascade_quad_contributions,
+    _lift_typed_cascade_vectors,
     _name_cascade_neighborhoods,
 )
 
@@ -36,6 +37,29 @@ float ReadValue() { return nested.value; }
     assert lifted.startswith('#include "include/example_abi.hlsl"\n\n')
     assert "cbuffer Example" not in lifted
     assert "float ReadValue()" in lifted
+
+
+def test_packed_parent_vectors_receive_domain_types() -> None:
+    source = """void mainPS() {
+  float4 packedIndirectState,normalDecodeState,centerDepthState,neighborhoodDepthA,neighborhoodDepthB;
+  // SM_COVERAGE_CANARY: parent_upscale
+  packedIndirectState.xyzw = input.xyzw;
+  normalDecodeState.xyzw = packedIndirectState.xyzw;
+  centerDepthState.xyz = Decode();
+  neighborhoodDepthA.xyz = Position();
+  neighborhoodDepthB.xyz = neighborhoodDepthA.xyz;
+  normalDecodeState.xyz = neighborhoodDepthB.xyz + neighborhoodDepthA.xyz;
+  packedIndirectState.yzw = Filter();
+  packedIndirectState.xyz = packedIndirectState.yzw / packedIndirectState.xxx;
+}
+"""
+
+    lifted = _lift_typed_cascade_vectors(source)
+
+    assert "float4 parentDepths, filterParameters;" in lifted
+    assert "float3 centerIndirect, centerPosition, viewDirection" in lifted
+    assert "filteredIndirect = cascadeIndirect / packedIndirectState.xxx" in lifted
+    assert ".xyz" not in lifted
 
 
 def test_weighted_gather_cluster_becomes_one_typed_contribution() -> None:
