@@ -168,7 +168,7 @@ UpscaleTemporalResult ResolveBoundUpscaleTemporal(
     UpscaleCascadeLighting cascade,
     float2 currentUv)
 {
-  return ResolveUpscaleTemporal(
+  UpscaleTemporalResult shadowResult = ResolveUpscaleTemporal(
       tTemporalAo, tTemporalSSS, tVolatile, LinearClampClamp_s,
       currentUv, surface.viewDepth, surface.viewPosition,
       surface.worldPosition, surface.ao, surface.sss,
@@ -177,6 +177,17 @@ UpscaleTemporalResult ResolveBoundUpscaleTemporal(
       cb_xPrevViewToWorld._m03_m13_m23, viewToWorld._m03_m13_m23,
       cb_vPrevRenderScale, cb_vPrevUvLimit, cb_fRenderScaleStability,
       cb_fFrameRateScale, cb_settings.vuSSSwaps);
+  UpscaleTemporalResult visibilityResult = ResolveUpscaleTemporal(
+      tTemporalAo, tTemporalSSS, tVolatile, LinearClampClamp_s,
+      currentUv, surface.viewDepth, surface.viewPosition,
+      surface.worldPosition, surface.ao, surface.sss,
+      surface.sssComplement, surface.sssOcclusion,
+      cascade.visibility, cb_xPrevWorldToViewProjection,
+      cb_xPrevViewToWorld._m03_m13_m23, viewToWorld._m03_m13_m23,
+      cb_vPrevRenderScale, cb_vPrevUvLimit, cb_fRenderScaleStability,
+      cb_fFrameRateScale, cb_settings.vuSSSwaps);
+  shadowResult.cascadeVisibility = visibilityResult.cascadeVisibility;
+  return shadowResult;
 }
 
 UpscaleTemporalResult ResolveBoundUpscaleTemporalWithoutCascadeHistory(
@@ -184,7 +195,8 @@ UpscaleTemporalResult ResolveBoundUpscaleTemporalWithoutCascadeHistory(
     UpscaleCascadeLighting cascade,
     float2 currentUv)
 {
-  return ResolveUpscaleTemporalWithoutCascadeHistory(
+  UpscaleTemporalResult result =
+      ResolveUpscaleTemporalWithoutCascadeHistory(
       tTemporalAo, tTemporalSSS, tVolatile, LinearClampClamp_s,
       currentUv, surface.viewDepth, surface.viewPosition,
       surface.worldPosition, surface.ao, surface.sss,
@@ -193,4 +205,6 @@ UpscaleTemporalResult ResolveBoundUpscaleTemporalWithoutCascadeHistory(
       cb_xPrevViewToWorld._m03_m13_m23, viewToWorld._m03_m13_m23,
       cb_vPrevRenderScale, cb_vPrevUvLimit, cb_fRenderScaleStability,
       cb_fFrameRateScale, cb_settings.vuSSSwaps);
+  result.cascadeVisibility = cascade.visibility;
+  return result;
 }

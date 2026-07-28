@@ -166,6 +166,7 @@ BoundAoPosition ReconstructBoundOrthoAoPosition(
   return result;
 }
 
+#ifndef INDIRECT_CASCADE_UPSCALE_AO_NO_CASCADE
 float EvaluateBoundAoDepthCascade(
     int2 pixel,
     BoundAoPosition sceneSurface,
@@ -205,6 +206,7 @@ float EvaluateBoundAoDepthCascade(
   return ApplyUpscaleDirectionalFacing(
       visibility, normal, cb_vDirectionalLightDirectionView.xyz);
 }
+#endif
 
 float2 ResolveBoundAoCascadeTemporal(
     float2 currentUv,

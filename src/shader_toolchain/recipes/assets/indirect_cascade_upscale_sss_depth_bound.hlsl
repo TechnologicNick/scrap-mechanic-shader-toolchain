@@ -169,6 +169,7 @@ BoundSssPosition ReconstructBoundOrthoSssPosition(
   return result;
 }
 
+#ifndef INDIRECT_CASCADE_UPSCALE_SSS_NO_CASCADE
 float EvaluateBoundDepthCascadeImpl(
     int2 pixel,
     float hzbDepth,
@@ -210,6 +211,7 @@ float EvaluateBoundDepthCascadeImpl(
   return ApplyUpscaleDirectionalFacing(
       visibility, normal, cb_vDirectionalLightDirectionView.xyz);
 }
+#endif
 
 float4 ResolveBoundSssTemporal(
     float2 currentUv,
@@ -281,6 +283,79 @@ float4 ResolveBoundSssTemporal(
   float historyWeight = surfaceWeight * stableMotion;
   float stabilityFloor = reprojectionStability * 0.875 + 0.125;
   historyWeight = stabilityFloor * historyWeight;
+  float spatialStability = min(nearDepthWeight, viewDistanceWeight);
+  historyWeight = historyWeight * spatialStability;
+  float4 historyDelta = previousSss + -currentSss;
+  return historyWeight * historyDelta + currentSss;
+}
+
+float4 ResolveBoundSssOnlyTemporal(
+    float2 currentUv,
+    float viewDepth,
+    BoundSssPosition hzbSurface,
+    float4 currentSss)
+{
+  float3 previousClip = ProjectUpscalePosition(
+      cb_xPrevWorldToViewProjection, hzbSurface.worldPosition);
+  float2 insidePrevious = abs(previousClip.xy) < previousClip.zz;
+  if (!(insidePrevious.x && insidePrevious.y))
+    return currentSss;
+
+  float viewDistance = dot(
+      hzbSurface.viewPosition, hzbSurface.viewPosition);
+  viewDistance = sqrt(viewDistance);
+  float2 previousUv = previousClip.xy / previousClip.zz;
+  previousUv = previousUv * float2(0.5, -0.5)
+      + float2(0.5, 0.5);
+  previousUv = cb_vPrevRenderScale.xy * previousUv;
+
+  float nearDepthWeight = -0.800000012 + viewDepth;
+  nearDepthWeight = saturate(4.0 * nearDepthWeight);
+  nearDepthWeight = nearDepthWeight * 0.200000003 + 0.800000012;
+  float viewDistanceWeight = -2.0 + viewDistance;
+  viewDistanceWeight = saturate(0.5 * viewDistanceWeight);
+  viewDistanceWeight = 1.0 + -viewDistanceWeight;
+
+  float3 cameraDelta =
+      -cb_xPrevViewToWorld._m03_m13_m23
+      + viewToWorld._m03_m13_m23;
+  float cameraMotion = dot(cameraDelta, cameraDelta);
+  cameraMotion = sqrt(cameraMotion);
+  float motionScale = max(0.00999999978, viewDepth);
+  motionScale = log2(motionScale);
+  motionScale = 1.5 * motionScale;
+  motionScale = exp2(motionScale);
+  motionScale = 0.00499999989 * motionScale;
+  motionScale = max(0.00999999978, motionScale);
+  float cameraStability = cameraMotion / motionScale;
+  cameraStability = min(1.0, cameraStability);
+  cameraStability = 1.0 + -cameraStability;
+
+  float volatility = ReadUpscaleVolatility(
+      tVolatile, LinearClampClamp_s, currentUv);
+  float reprojectionStability = 1.0 + -abs(volatility);
+  bool forcedCurrentPixel = volatility < 0.0;
+  float lostStability = 1.0 + -reprojectionStability;
+  float forcedStability = lostStability
+      * (-nearDepthWeight * 0.600000024 + 1.0);
+  if (forcedCurrentPixel)
+  {
+    previousUv = currentUv;
+    reprojectionStability = forcedStability;
+  }
+  reprojectionStability =
+      cb_fRenderScaleStability * reprojectionStability;
+  previousUv = min(cb_vPrevUvLimit.xy, previousUv);
+  float4 previousSss = SwizzleUpscaleSss(
+      tTemporalSSS.SampleLevel(
+          LinearClampClamp_s, previousUv, 0.0),
+      cb_settings.vuSSSwaps);
+
+  float stableMotion = cameraStability * 0.600000024 + 0.400000006;
+  stableMotion = 0.5 * stableMotion;
+  stableMotion = forcedCurrentPixel ? 0.5 : stableMotion;
+  float stabilityFloor = reprojectionStability * 0.875 + 0.125;
+  float historyWeight = stableMotion * stabilityFloor;
   float spatialStability = min(nearDepthWeight, viewDistanceWeight);
   historyWeight = historyWeight * spatialStability;
   float4 historyDelta = previousSss + -currentSss;

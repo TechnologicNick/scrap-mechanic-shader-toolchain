@@ -10,13 +10,26 @@ from shader_toolchain.recipes.indirect_cascade_upscale import (
     _lift_material_responses,
     _lift_normal_decodes,
     _lift_bound_cascade_only_main,
+    _lift_bound_cascade_no_history_main,
     _lift_bound_indirect_only_main,
     _lift_bound_sss_depth_cascade_main,
+    _lift_bound_sss_only_main,
+    _lift_bound_indirect_sss_main,
+    _lift_bound_ao_only_main,
+    _lift_bound_ao_sss_main,
+    _lift_bound_cascade_indirect_main,
     _lift_bound_full_output_main,
     _lift_bound_ao_depth_cascade_main,
     _lift_bound_cascade_depth_only_main,
+    _lift_bound_cascade_depth_no_history_main,
+    _lift_bound_cascade_payload_no_history_main,
+    _lift_bound_ao_cascade_no_history_main,
+    _lift_bound_cascade_payload_main,
+    _lift_bound_ao_cascade_main,
+    _lift_bound_full_temporal_main,
     _lift_bound_full_depth_no_history_main,
     _lift_bound_ao_indirect_main,
+    _lift_bound_ao_indirect_sss_main,
     _lift_bound_upscale_main,
 )
 
@@ -124,13 +137,20 @@ void mainPS() {
         "// 0.0588235296 int2(-2,-2) int2(2,2)\n" + common,
         quality="high",
     )
+    low_ortho = _lift_bound_cascade_only_main(
+        "// 0.142857149 int2(-1,-1) int2(1,1)\n" + common,
+        quality="low",
+        perspective=False,
+    )
 
     assert "EvaluateBoundLowCascadeOnlyLighting" in low
     assert "EvaluateBoundMediumCascadeOnlyLighting" in medium
     assert "ResolveBoundLowMediumCascadeOnlyTemporal" in medium
     assert "EvaluateBoundMediumCascadeOnlyLighting" in high
     assert "ResolveBoundHighCascadeOnlyTemporal" in high
-    assert "registerState" not in low + medium + high
+    assert "GatherBoundOrthoCascadeSurface" in low_ortho
+    assert "indirect_cascade_upscale_cascade_depth_bound.hlsl" in low_ortho
+    assert "registerState" not in low + medium + high + low_ortho
 
 
 def test_cascade_depth_only_main_selects_projection_and_quality_policies() -> None:
@@ -288,6 +308,7 @@ def test_sss_depth_bound_asset_exposes_composed_pipeline() -> None:
     assert "ReconstructBoundOrthoSssPosition" in source
     assert "EvaluateBoundDepthCascadeImpl" in source
     assert "ResolveBoundSssTemporal" in source
+    assert "ResolveBoundSssOnlyTemporal" in source
 
 
 def test_sss_depth_main_selects_projection_and_shadow_quality() -> None:
@@ -323,6 +344,272 @@ void mainPS() {
     assert "sceneSurface, true" in medium_ortho
     assert "ResolveBoundSssTemporal" in low + medium_ortho
     assert "registerState" not in low + medium_ortho
+
+
+def test_sss_only_main_reuses_spatial_and_temporal_pipeline() -> None:
+    source = """// tSSS.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// GatherUpscaleDepthError(
+// ComputeUpscaleGaussianWeight(
+// ComputeUpscaleCoverageWeight(
+// SwizzleUpscaleSss(
+// out float4 o2 : SV_Target2
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    perspective = _lift_bound_sss_only_main(source, perspective=True)
+    ortho = _lift_bound_sss_only_main(source, perspective=False)
+    assert "FilterBoundSssCross" in perspective
+    assert "ReconstructBoundPerspectiveSssPosition" in perspective
+    assert "ReconstructBoundOrthoSssPosition" in ortho
+    assert "ResolveBoundSssOnlyTemporal" in perspective + ortho
+    assert "registerState" not in perspective + ortho
+
+
+def test_indirect_sss_main_composes_shared_output_pipelines() -> None:
+    source = """// tSSS.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// tTemporalIndirect.SampleLevel(
+// GatherUpscaleDepthError(
+// ComputeUpscaleGaussianWeight(
+// ComputeUpscaleCoverageWeight(
+// out float3 o1 : SV_Target1
+// out float4 o2 : SV_Target2
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    perspective = _lift_bound_indirect_sss_main(
+        source, perspective=True
+    )
+    ortho = _lift_bound_indirect_sss_main(source, perspective=False)
+    assert "FilterBoundIndirectCross" in perspective
+    assert "FilterBoundSssCross" in perspective
+    assert "ReconstructBoundPerspectiveSssPosition" in perspective
+    assert "ReconstructBoundOrthoSssPosition" in ortho
+    assert "ResolveBoundIndirectTemporal" in perspective + ortho
+    assert "ResolveBoundSssOnlyTemporal" in perspective + ortho
+    assert "registerState" not in perspective + ortho
+
+
+def test_ao_only_main_selects_projection_and_quality_response() -> None:
+    source = """// tIndirect_Ao.SampleLevel(
+// tTemporalAo.SampleLevel(
+// GatherUpscaleDepthError(
+// ComputeUpscaleGaussianWeight(
+// ComputeUpscaleCoverageWeight(
+// out float2 o0 : SV_Target0
+// o0.y = 1;
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    low = _lift_bound_ao_only_main(
+        source, perspective=True, quality="low"
+    )
+    high_ortho = _lift_bound_ao_only_main(
+        source, perspective=False, quality="high"
+    )
+    assert "FilterBoundAoCross" in low
+    assert "ReconstructBoundPerspectiveAoPosition" in low
+    assert "ReconstructBoundOrthoAoPosition" in high_ortho
+    assert "0.819999993" in low
+    assert "0.649999976" in high_ortho
+    assert "registerState" not in low + high_ortho
+
+
+def test_ao_sss_main_composes_both_temporal_outputs() -> None:
+    source = """// tIndirect_Ao.SampleLevel(
+// tTemporalAo.SampleLevel(
+// tSSS.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// GatherUpscaleDepthError(
+// ComputeUpscaleCoverageWeight(
+// out float2 o0 : SV_Target0
+// out float4 o2 : SV_Target2
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    low = _lift_bound_ao_sss_main(
+        source, perspective=True, quality="low"
+    )
+    high_ortho = _lift_bound_ao_sss_main(
+        source, perspective=False, quality="high"
+    )
+    assert "FilterBoundAoCross" in low
+    assert "FilterBoundSssCross" in low
+    assert "ReconstructBoundPerspectiveAoPosition" in low
+    assert "ReconstructBoundOrthoSssPosition" in high_ortho
+    assert "ResolveBoundAoCascadeTemporal" in low + high_ortho
+    assert "ResolveBoundSssOnlyTemporal" in low + high_ortho
+    assert "0.819999993" in low
+    assert "0.649999976" in high_ortho
+    assert "registerState" not in low + high_ortho
+
+
+def test_ao_indirect_sss_main_composes_three_temporal_outputs() -> None:
+    source = """// tIndirect_Ao.SampleLevel(
+// tTemporalIndirect.SampleLevel(
+// tTemporalAo.SampleLevel(
+// tSSS.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// GatherUpscaleDepthError(
+// ComputeUpscaleGaussianWeight(
+// ComputeUpscaleCoverageWeight(
+// SwizzleUpscaleSss(
+// out float2 o0 : SV_Target0
+// out float3 o1 : SV_Target1
+// out float4 o2 : SV_Target2
+// o0.y = 1;
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    low = _lift_bound_ao_indirect_sss_main(
+        source, perspective=True, quality="low"
+    )
+    high_ortho = _lift_bound_ao_indirect_sss_main(
+        source, perspective=False, quality="high"
+    )
+    assert "GatherBoundPerspectiveAoIndirectSurface" in low
+    assert "GatherBoundOrthoAoIndirectSurface" in high_ortho
+    assert "ReconstructBoundPerspectiveSssPosition" in low
+    assert "ReconstructBoundOrthoSssPosition" in high_ortho
+    assert "ResolveBoundAoIndirectTemporal" in low + high_ortho
+    assert "ResolveBoundIndirectTemporal" in low + high_ortho
+    assert "ResolveBoundSssOnlyTemporal" in low + high_ortho
+    assert "0.819999993" in low
+    assert "0.649999976" in high_ortho
+    assert "registerState" not in low + high_ortho
+
+
+def test_cascade_indirect_main_selects_all_family_policies() -> None:
+    source = """// tTemporalAo.SampleLevel(
+// tTemporalIndirect.SampleLevel(
+// tIndirect_Ao.SampleLevel(
+// GatherUpscaleDepthError(
+// out float2 o0 : SV_Target0
+// out float3 o1 : SV_Target1
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS() {
+  float4 registerState;
+}
+"""
+    low = _lift_bound_cascade_indirect_main(
+        "// 0.142857149 int2(-1,-1) int2(1,1)\n" + source,
+        perspective=True,
+        quality="low",
+    )
+    high_ortho = _lift_bound_cascade_indirect_main(
+        "// 0.0588235296 int2(-2,-2) int2(2,2)\n" + source,
+        perspective=False,
+        quality="high",
+    )
+    assert "GatherBoundPerspectiveCascadeSurface" in low
+    assert "EvaluateBoundLowCascadeOnlyLighting" in low
+    assert "ResolveBoundLowMediumCascadeOnlyTemporal" in low
+    assert "GatherBoundOrthoCascadeSurface" in high_ortho
+    assert "EvaluateBoundMediumCascadeOnlyLighting" in high_ortho
+    assert "ResolveBoundHighCascadeOnlyTemporal" in high_ortho
+    assert "FilterBoundIndirectCross" in low + high_ortho
+    assert "ResolveBoundIndirectTemporal" in low + high_ortho
+    assert "registerState" not in low + high_ortho
+
+
+def test_cascade_no_history_mains_omit_temporal_resolution() -> None:
+    cascade_source = """// 0.330000013
+// 0.142857149
+// int2(-1,-1)
+// int2(1,1)
+// out float2 o0 : SV_Target0
+// o0.xy = cascadeAddressState.yx;
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS()
+{
+  float4 registerState;
+}
+"""
+    depth_source = cascade_source.replace(
+        "// 0.330000013",
+        "// 0.330000013\n// LinearizeUpscaleDepth(tDepth.Load(",
+    )
+    cascade = _lift_bound_cascade_no_history_main(
+        cascade_source, perspective=True, quality="low"
+    )
+    depth = _lift_bound_cascade_depth_no_history_main(
+        depth_source, perspective=False, quality="low"
+    )
+    assert "GatherBoundPerspectiveCascadeSurface" in cascade
+    assert "EvaluateBoundLowCascadeOnlyLighting" in cascade
+    assert "ReconstructBoundOrthoCascadePosition" in depth
+    assert "EvaluateBoundLowDepthCascadeOnlyLighting" in depth
+    assert "ResolveBound" not in cascade + depth
+    assert "registerState" not in cascade + depth
+
+
+def test_cascade_payload_no_history_composes_optional_outputs() -> None:
+    source = """// 0.330000013 0.0588235296
+// int2(-2,-2) int2(2,2)
+// LinearizeUpscaleDepth(tDepth.Load(
+// tIndirect_Ao.SampleLevel(
+// tTemporalIndirect.SampleLevel(
+// tSSS.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// SwizzleUpscaleSss(
+// out float2 o0 : SV_Target0
+// out float3 o1 : SV_Target1
+// out float4 o2 : SV_Target2
+// 0.959999979
+// 3Dmigoto declarations
+#define cmp -
+
+
+void mainPS()
+{
+  float4 registerState;
+}
+"""
+    lifted = _lift_bound_cascade_payload_no_history_main(
+        source,
+        perspective=False,
+        quality="medium",
+        from_depth=True,
+        indirect=True,
+        sss=True,
+    )
+    assert "EvaluateBoundMediumDepthCascadeOnlyLighting" in lifted
+    assert "ResolveBoundIndirectTemporal" in lifted
+    assert "ResolveBoundSssTemporal" in lifted
+    assert "min(resolvedSss.x, visibility)" in lifted
+    assert "registerState" not in lifted
 
 
 def test_full_bound_asset_composes_all_output_pipelines() -> None:
@@ -422,9 +709,9 @@ void mainPS() {
 
 def test_bound_main_removes_decompiler_register_shell() -> None:
     source = """// UpscaledAoSss spatialAoSss = FilterAoSssCross(
-// EvaluateUpscaleMediumCascadeShadow(
-// ApplyUpscaleDirectionalFacing(
-// UpscaleTemporalResult temporalResult = ResolveUpscaleTemporal(
+// tTemporalAo.SampleLevel(
+// tTemporalSSS.SampleLevel(
+// o0.y = min(normalDecodeState.x, cascadeAddressState.y);
 // 3Dmigoto declarations
 #define cmp -
 
