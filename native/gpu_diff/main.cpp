@@ -29,6 +29,8 @@ enum class ConstantProfile {
     hdr,
     rect,
     cluster,
+    main_light_cluster,
+    main_light_lights,
     reflection,
     bloom,
     ao,
@@ -80,6 +82,7 @@ enum class StructuredInputProfile {
     random,
     zero,
     volumetric,
+    main_light,
 };
 
 struct StructuredInputBinding {
@@ -219,6 +222,8 @@ ConstantProfile parse_constant_profile(const std::string& profile) {
     if (profile == "hdr") return ConstantProfile::hdr;
     if (profile == "rect") return ConstantProfile::rect;
     if (profile == "cluster") return ConstantProfile::cluster;
+    if (profile == "main-light-cluster") return ConstantProfile::main_light_cluster;
+    if (profile == "main-light-lights") return ConstantProfile::main_light_lights;
     if (profile == "reflection") return ConstantProfile::reflection;
     if (profile == "bloom") return ConstantProfile::bloom;
     if (profile == "ao") return ConstantProfile::ao;
@@ -242,6 +247,7 @@ StructuredInputProfile parse_structured_input_profile(
     if (profile == "random") return StructuredInputProfile::random;
     if (profile == "zero") return StructuredInputProfile::zero;
     if (profile == "volumetric") return StructuredInputProfile::volumetric;
+    if (profile == "main-light") return StructuredInputProfile::main_light;
     throw std::runtime_error("unknown structured input profile: " + profile);
 }
 
@@ -262,6 +268,8 @@ const char* constant_profile_name(ConstantProfile profile) {
     case ConstantProfile::hdr: return "hdr";
     case ConstantProfile::rect: return "rect";
     case ConstantProfile::cluster: return "cluster";
+    case ConstantProfile::main_light_cluster: return "main-light-cluster";
+    case ConstantProfile::main_light_lights: return "main-light-lights";
     case ConstantProfile::reflection: return "reflection";
     case ConstantProfile::bloom: return "bloom";
     case ConstantProfile::ao: return "ao";
@@ -881,6 +889,70 @@ public:
             const uint32_t depth_lights = 2;
             std::memcpy(&constants[1], &slice_size, sizeof(slice_size));
             std::memcpy(&constants[5], &depth_lights, sizeof(depth_lights));
+        } else if (profile == ConstantProfile::main_light_cluster) {
+            const uint32_t one = 1;
+            const uint32_t all_bits = 0xffffffffu;
+            std::memcpy(&constants[1], &one, sizeof(one));
+            std::memcpy(&constants[4], &one, sizeof(one));
+            std::memcpy(&constants[7 * 4], &all_bits, sizeof(all_bits));
+            constants[3] = 1.0f;
+            constants[6 * 4 + 2] = 10000.0f;
+            constants[6 * 4 + 3] = 1.0f;
+        } else if (profile == ConstantProfile::main_light_lights) {
+            SplitMix64 random{
+                options_.seed ^ (static_cast<uint64_t>(case_index) << 32)};
+            const auto set_uint = [&](size_t offset, uint32_t value) {
+                std::memcpy(&constants[offset], &value, sizeof(value));
+            };
+            float* ambient = constants.data();
+            ambient[0] = random.unit() * 2.0f - 1.0f;
+            ambient[1] = random.unit() * 2.0f - 1.0f;
+            ambient[2] = -0.5f - random.unit() * 2.0f;
+            ambient[3] = 0.2f;
+            ambient[4] = 0.2f + random.unit() * 0.8f;
+            ambient[5] = 0.2f + random.unit() * 0.8f;
+            ambient[6] = 0.2f + random.unit() * 0.8f;
+            ambient[7] = 0.5f + random.unit() * 2.0f;
+
+            float* point = constants.data() + 510 * 4;
+            point[0] = random.unit() * 2.0f - 1.0f;
+            point[1] = random.unit() * 2.0f - 1.0f;
+            point[2] = -0.5f - random.unit() * 2.0f;
+            point[3] = 0.2f;
+            set_uint(510 * 4 + 4, 0xff906000u | (case_index & 1u));
+            point[5] = 0.5f + random.unit() * 2.0f;
+            point[6] = 4.0f;
+            point[7] = 2.0f;
+
+            float* spot = constants.data() + 1020 * 4;
+            spot[0] = random.unit() * 2.0f - 1.0f;
+            spot[1] = random.unit() * 2.0f - 1.0f;
+            spot[2] = -0.5f - random.unit() * 2.0f;
+            spot[3] = 0.2f;
+            spot[4] = 0.0f;
+            spot[5] = 0.0f;
+            spot[6] = 1.0f;
+            spot[7] = 0.5f + random.unit() * 2.0f;
+            // Cookie nibble 1 selects layer zero. This exercises both the
+            // ordinary and flow-cookie sampling paths in main_light.
+            set_uint(1020 * 4 + 8, 0xff906010u | (case_index & 1u));
+            spot[9] = 1.5f;
+            spot[10] = -0.25f;
+            spot[11] = 4.0f;
+            spot[12] = 2.0f;
+            for (uint32_t diagonal = 0; diagonal < 4; ++diagonal) {
+                spot[16 + diagonal * 5] = 1.0f;
+            }
+            spot[32] = 0.0f;
+            spot[33] = 0.0f;
+            spot[34] = 0.5f;
+            spot[35] = 0.2f;
+            float* cookie = constants.data() + 92 * 4;
+            cookie[0] = random.unit() * 0.25f;
+            cookie[1] = random.unit() * 0.25f;
+            cookie[4] = 0.05f;
+            cookie[5] = (case_index & 2u) != 0 ? 0.2f : 0.05f;
+            cookie[6] = 0.35f;
         } else if (profile == ConstantProfile::volumetric_cluster) {
             const uint32_t one = 1;
             std::memcpy(&constants[1 * 4 + 0], &one, sizeof(one));
@@ -2110,6 +2182,35 @@ int main(int argc, char** argv) {
                         break;
                     case 7:
                         values[0] = 0x101u; values[1] = 0x3u; values[9] = 0x3u;
+                        break;
+                    default: break;
+                    }
+                } else if (profile == StructuredInputProfile::main_light) {
+                    std::fill(values.begin(), values.end(), 0u);
+                    if (values.size() < 33) {
+                        throw std::runtime_error(
+                            "main-light structured input needs 33 uint elements");
+                    }
+                    switch (index % 8) {
+                    case 1: values[0] = 0x000001u; values[1] = 0x1u; break;
+                    case 2: values[0] = 0x000100u; values[9] = 0x1u; break;
+                    case 3: values[0] = 0x010000u; values[17] = 0x1u; break;
+                    case 4:
+                        values[0] = 0x000101u;
+                        values[1] = 0x1u;
+                        values[9] = 0x1u;
+                        break;
+                    case 5:
+                        values[0] = 0x010100u;
+                        values[9] = 0x1u;
+                        values[17] = 0x1u;
+                        break;
+                    case 6:
+                    case 7:
+                        values[0] = 0x010101u;
+                        values[1] = 0x1u;
+                        values[9] = 0x1u;
+                        values[17] = 0x1u;
                         break;
                     default: break;
                     }

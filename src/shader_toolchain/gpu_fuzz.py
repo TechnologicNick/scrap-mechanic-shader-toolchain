@@ -1064,7 +1064,9 @@ def fuzz_semantic_shader(
     if any(
         binding["slot"] < 0 or binding["elements"] < 1
         or binding["stride"] < 4 or binding["stride"] % 4
-        or binding["profile"] not in ("random", "zero", "volumetric")
+        or binding["profile"] not in (
+            "random", "zero", "volumetric", "main-light"
+        )
         for binding in structured_inputs
     ) or any(
         binding["slot"] < 0 or binding["elements"] < 1
@@ -1125,7 +1127,7 @@ def fuzz_semantic_shader(
         raise ToolchainError(f"unsupported fuzz output: {output_kind}")
     if any(
         binding["profile"] not in (
-            "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "reflection",
+            "projection", "random", "composition", "composition-fog", "hdr", "rect", "cluster", "main-light-cluster", "main-light-lights", "reflection",
             "bloom", "ao", "fsr-easu", "fsr-rcas", "index", "auto-hdr",
             "cloud", "cluster-culling",
             "hzb", "godrays", "volumetric-cluster", "volumetric-lights",
