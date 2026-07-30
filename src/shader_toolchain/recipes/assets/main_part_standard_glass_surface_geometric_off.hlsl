@@ -1,0 +1,3 @@
+#define MAIN_PART_STANDARD_GLASS_OFF_AMBIENT
+#include "main_part_standard_glass_surface_geometric_common.hlsl"
+#undef MAIN_PART_STANDARD_GLASS_OFF_AMBIENT

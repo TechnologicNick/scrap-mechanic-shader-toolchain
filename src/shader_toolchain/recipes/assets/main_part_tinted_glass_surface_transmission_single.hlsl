@@ -1,0 +1,6 @@
+// Policy wrapper kept separate so other tinted frontends can reuse the core.
+#define MAIN_PART_GLASS_SURFACE_ENABLE_SINGLE_PROBE
+#define MAIN_PART_TINTED_GLASS_SINGLE_PROBE
+#include "main_part_tinted_glass_surface_transmission_common.hlsl"
+#undef MAIN_PART_TINTED_GLASS_SINGLE_PROBE
+#undef MAIN_PART_GLASS_SURFACE_ENABLE_SINGLE_PROBE

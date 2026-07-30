@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..hlsl import module_variants
 from ..reflect import ShaderReflector
@@ -137,6 +137,27 @@ def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
     return execution
 
 
+def emit_character_variant_snippets(
+    staging: Path,
+    source_name: str,
+    variants: dict[str, str],
+) -> dict[str, str]:
+    """Emit material permutations as independently editable shader files."""
+    snippet_root = staging / "semantic" / "include" / source_name
+    snippet_root.mkdir(parents=True, exist_ok=True)
+    bodies: dict[str, str] = {}
+    for selector, source in variants.items():
+        filename = f"{selector}.hlsl"
+        source = source.replace('#include "include/', '#include "../')
+        (snippet_root / filename).write_text(
+            SEMANTIC_PHASE_MAP + source,
+            encoding="utf-8",
+            newline="\n",
+        )
+        bodies[selector] = f'#include "include/{source_name}/{filename}"\n'
+    return bodies
+
+
 def apply_character_material_recipe(
     staging: Path,
     records: list[dict[str, Any]],
@@ -146,6 +167,8 @@ def apply_character_material_recipe(
     source_name: str,
     shader_count: int,
     pixel_count: int,
+    split_variants: bool = False,
+    variant_lifter: Callable[[Path, str, list[str], str], str] | None = None,
 ) -> dict[str, Any] | None:
     shaders = [
         record for record in records if record["source_name"] == source_name
@@ -275,11 +298,21 @@ def apply_character_material_recipe(
                 source, names,
                 note="Skinning, effects, and material lighting retain DXBC order.",
             )
+        if variant_lifter is not None:
+            source = variant_lifter(
+                staging, selector, definitions[selector], source
+            )
         expanded[selector] = source
-    bodies = {
-        shader["selector"]: SEMANTIC_PHASE_MAP + expanded[shader["selector"]]
-        for shader in shaders
-    }
+    if split_variants:
+        bodies = emit_character_variant_snippets(
+            staging, source_name, expanded
+        )
+    else:
+        bodies = {
+            shader["selector"]: SEMANTIC_PHASE_MAP
+            + expanded[shader["selector"]]
+            for shader in shaders
+        }
     executions = {
         shader["selector"]: _execution(shader, blobs[shader["bundle_index"]])
         for shader in shaders if shader["stage"] == "pixel"

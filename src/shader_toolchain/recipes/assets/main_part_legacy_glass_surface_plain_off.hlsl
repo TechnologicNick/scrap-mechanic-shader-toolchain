@@ -1,0 +1,6 @@
+// Reflection-off legacy glass retains the original constant gloss response.
+#define MAIN_PART_LEGACY_GLASS_SURFACE_NO_CUTOUT
+#define MAIN_PART_LEGACY_GLASS_SURFACE_OFF_AMBIENT
+#include "main_part_legacy_glass_surface_basic.hlsl"
+#undef MAIN_PART_LEGACY_GLASS_SURFACE_OFF_AMBIENT
+#undef MAIN_PART_LEGACY_GLASS_SURFACE_NO_CUTOUT

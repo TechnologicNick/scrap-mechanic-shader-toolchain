@@ -1,0 +1,4 @@
+#define MAIN_PART_GLASS_SURFACE_ENABLE_MEDIUM_CLUSTERED
+#include "main_part_glass_surface_shared.hlsl"
+#undef MAIN_PART_GLASS_SURFACE_ENABLE_MEDIUM_CLUSTERED
+#include "main_part_glass_surface_common.hlsl"

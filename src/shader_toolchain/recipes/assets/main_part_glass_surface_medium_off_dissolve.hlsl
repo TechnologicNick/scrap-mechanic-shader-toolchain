@@ -1,0 +1,3 @@
+#define MAIN_PART_GLASS_SURFACE_HAS_DISSOLVE
+#include "main_part_glass_surface_medium_off.hlsl"
+#undef MAIN_PART_GLASS_SURFACE_HAS_DISSOLVE

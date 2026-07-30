@@ -1,0 +1,10 @@
+#define MAIN_PART_GLASS_SURFACE_ENABLE_MEDIUM_CLUSTERED
+#define MAIN_PART_GLASS_SURFACE_ENABLE_MULTI_PROBES
+#define MAIN_PART_GLASS_SURFACE_HAS_DISSOLVE
+#include "main_part_glass_surface_shared.hlsl"
+#undef MAIN_PART_GLASS_SURFACE_HAS_DISSOLVE
+#undef MAIN_PART_GLASS_SURFACE_ENABLE_MULTI_PROBES
+#undef MAIN_PART_GLASS_SURFACE_ENABLE_MEDIUM_CLUSTERED
+// Compatibility for already-migrated wrappers; new wrappers call the generic
+// medium evaluator directly.
+#define EvaluateMainPartDissolveGlassSurfaceMedium EvaluateMainPartGlassSurfaceMedium

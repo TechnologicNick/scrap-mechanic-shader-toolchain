@@ -1,0 +1,3 @@
+#define MAIN_PART_TINTED_GLASS_OFF_AMBIENT
+#include "main_part_tinted_glass_surface_dissolve_common.hlsl"
+#undef MAIN_PART_TINTED_GLASS_OFF_AMBIENT
