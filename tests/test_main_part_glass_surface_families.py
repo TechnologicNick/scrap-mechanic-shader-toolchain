@@ -19,6 +19,18 @@ from shader_toolchain.recipes.main_part_glass_surface_families import (
     MEDIUM_MULTI_NO_CUTOUT,
     MEDIUM_OFF_NO_CUTOUT,
     MEDIUM_SINGLE_NO_CUTOUT,
+    MEDIUM_MULTI_LIGHT_CAP,
+    MEDIUM_SINGLE_LIGHT_CAP,
+    MEDIUM_OFF_LIGHT_CAP,
+    MEDIUM_MULTI_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_SINGLE_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_OFF_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_MULTI_STANDARD,
+    MEDIUM_SINGLE_STANDARD,
+    MEDIUM_OFF_STANDARD,
+    MEDIUM_MULTI_STANDARD_GEOMETRIC,
+    MEDIUM_SINGLE_STANDARD_GEOMETRIC,
+    MEDIUM_OFF_STANDARD_GEOMETRIC,
     classify_main_part_glass_surface_family,
     lift_main_part_glass_surface_family,
 )
@@ -100,6 +112,44 @@ def test_glass_surface_family_is_classified_by_complete_policy() -> None:
         assert classify_main_part_glass_surface_family(
             family.defines, plain_source
         ) == family
+    light_cap_source = plain_source.replace(
+        "Texture2D<float4> tDif : register(t0);",
+        "Texture2D<float4> tDif : register(t0);\n"
+        "Texture2D<float4> tLightCap : register(t4);",
+    )
+    for family in (
+        MEDIUM_MULTI_LIGHT_CAP,
+        MEDIUM_SINGLE_LIGHT_CAP,
+        MEDIUM_OFF_LIGHT_CAP,
+        MEDIUM_MULTI_LIGHT_CAP_UNRESPONSIVE,
+        MEDIUM_SINGLE_LIGHT_CAP_UNRESPONSIVE,
+        MEDIUM_OFF_LIGHT_CAP_UNRESPONSIVE,
+    ):
+        assert classify_main_part_glass_surface_family(
+            family.defines, light_cap_source
+        ) == family
+    standard_source = plain_source.replace(
+        " nointerpolation float v9 : CUTOFF0,\n", ""
+    )
+    for family in (
+        MEDIUM_MULTI_STANDARD,
+        MEDIUM_SINGLE_STANDARD,
+        MEDIUM_OFF_STANDARD,
+    ):
+        assert classify_main_part_glass_surface_family(
+            family.defines, standard_source
+        ) == family
+    geometric_source = standard_source.replace(
+        " float3 v4 : TANGENT0,\n  float3 v5 : BITANGENT0,", ""
+    )
+    for family in (
+        MEDIUM_MULTI_STANDARD_GEOMETRIC,
+        MEDIUM_SINGLE_STANDARD_GEOMETRIC,
+        MEDIUM_OFF_STANDARD_GEOMETRIC,
+    ):
+        assert classify_main_part_glass_surface_family(
+            family.defines, geometric_source
+        ) == family
 
 
 def test_glass_surface_wrapper_is_semantic_and_small() -> None:
@@ -124,7 +174,28 @@ def test_glass_surface_asset_has_typed_phase_helpers() -> None:
         "DecodeMainPartTwoSidedNormal",
         "EvaluateMainPartDissolveGlassMaterial",
         "EvaluateMainPartGlassDirectionalLighting",
+        "EvaluateMainPartStandardGlassDirectionalLighting",
         "ComposeMainPartDissolveGlassSurface",
+        "EvaluateMainPartLightCapGlassMaterial",
     ):
         assert helper in asset
     assert "…" not in asset
+
+
+def test_clustered_glass_backend_has_typed_traversal_helpers() -> None:
+    asset = Path(
+        "src/shader_toolchain/recipes/assets/"
+        "main_part_glass_clustered_lighting.hlsl"
+    ).read_text(encoding="utf-8")
+    for helper in (
+        "ResolveMainPartGlassCluster",
+        "AccumulateMainPartGlassPointLight",
+        "AccumulateMainPartGlassSpotLight",
+        "EvaluateMainPartGlassLocalLights",
+        "AccumulateMainPartGlassProbe",
+        "EvaluateMainPartGlassReflectionProbes",
+        "EvaluateMainPartGlassDiffuseResponse",
+    ):
+        assert helper in asset
+    assert "partPositionState" not in asset
+    assert "reflectionAndRefractionState" not in asset

@@ -32,10 +32,12 @@ from .recipes.main_part_early_gforward_families import (
 from .recipes.main_part_transparent_families import (
     lift_main_part_transparent_family,
 )
-from .recipes.main_part_glass_surface_families import (
-    lift_main_part_glass_surface_family,
-)
+from .main_part_phase_compiler import compile_main_part_phase_graph
 from .recipes.main_part import lift_main_part_variant
+from .recipes.main_character import main_character_execution
+from .recipes.main_part_directional_glass_surface import (
+    classify_main_part_directional_glass_surface,
+)
 from .reflect import ShaderReflector
 from .sbc import D3DCompiler
 
@@ -103,6 +105,9 @@ def _asset_closure(asset_root: Path) -> set[str]:
         if (asset_root / filename).exists()
     )
     pending.add("main_part_gbuffer.hlsl")
+    pending.add("main_part_directional_glass_surface.hlsl")
+    pending.add("main_part_tinted_dissolve_glass_surface.hlsl")
+    pending.add("main_part_directional_map.hlsl")
     pending.add("main_part_visualization_depth.hlsl")
     pending.add("main_part_glass_behind_light_cap.hlsl")
     pending.add("main_part_glass_surface_medium_dissolve.hlsl")
@@ -121,6 +126,16 @@ def _asset_closure(asset_root: Path) -> set[str]:
     pending.add("main_part_glass_surface_medium_no_cutout.hlsl")
     pending.add("main_part_glass_surface_medium_off_no_cutout.hlsl")
     pending.add("main_part_glass_surface_medium_single_no_cutout.hlsl")
+    pending.add("main_part_glass_surface_medium_light_cap.hlsl")
+    pending.add("main_part_glass_surface_medium_light_cap_single.hlsl")
+    pending.add("main_part_glass_surface_medium_light_cap_off.hlsl")
+    pending.add("main_part_glass_surface_medium_light_cap_unresponsive.hlsl")
+    pending.add(
+        "main_part_glass_surface_medium_light_cap_single_unresponsive.hlsl"
+    )
+    pending.add(
+        "main_part_glass_surface_medium_light_cap_off_unresponsive.hlsl"
+    )
     pending.add("main_part_legacy_glass_surface_basic.hlsl")
     pending.add("main_part_legacy_glass_surface_single.hlsl")
     pending.add("main_part_legacy_glass_surface_plain_multi.hlsl")
@@ -139,6 +154,19 @@ def _asset_closure(asset_root: Path) -> set[str]:
     pending.add("main_part_standard_glass_surface_geometric_multi.hlsl")
     pending.add("main_part_standard_glass_surface_geometric_off.hlsl")
     pending.add("main_part_standard_glass_surface_geometric_single.hlsl")
+    pending.add("main_part_glass_surface_medium_standard.hlsl")
+    pending.add("main_part_glass_surface_medium_single_standard.hlsl")
+    pending.add("main_part_glass_surface_medium_off_standard.hlsl")
+    pending.add("main_part_glass_surface_medium_standard_geometric.hlsl")
+    pending.add("main_part_glass_surface_medium_single_standard_geometric.hlsl")
+    pending.add("main_part_glass_surface_medium_off_standard_geometric.hlsl")
+    pending.update(
+        path.name
+        for path in asset_root.glob("main_part_*.hlsl")
+        if path.read_text(encoding="utf-8").startswith(
+            "// Synthesized semantic family"
+        )
+    )
     output: set[str] = set()
     while pending:
         filename = pending.pop()
@@ -264,9 +292,12 @@ def migrate_main_part_families(
                     shader["defines"], source
                 )
             if result is None:
-                result = lift_main_part_glass_surface_family(
-                    shader["defines"], source
+                compiled_graph = compile_main_part_phase_graph(
+                    shader["defines"], source,
+                    selector=shader["selector"],
                 )
+                if compiled_graph is not None:
+                    result = (compiled_graph.family, compiled_graph.source)
             if result is None:
                 lifted = lift_main_part_variant(
                     asset_root, shader["selector"], shader["defines"], source
@@ -342,6 +373,12 @@ def migrate_main_part_families(
                 )
             shader["semantic_assembly_exact"] = comparison["assembly_exact"]
             shader["semantic_abi_compatible"] = True
+            key = shader["shader_key"]
+            if key.startswith("0x"):
+                key = key[2:]
+            shader["semantic_execution"] = main_character_execution(
+                shader, (dxbc_root / f"{key.lower()}.dxbc").read_bytes()
+            )
         # Fingerprint the installed factored module exactly as corpus
         # verification sees it.  This matters when two helpers include the
         # same guarded dependency: the factored-module expander resolves that
@@ -363,6 +400,16 @@ def migrate_main_part_families(
         validated_selectors = {item[0]["selector"] for item in validated}
         semantic_root = (corpus / "semantic").resolve()
         for shader in main_part_records:
+            snippet = snippet_root / f"{shader['selector']}.hlsl"
+            if classify_main_part_directional_glass_surface(
+                shader["defines"], snippet.read_text(encoding="utf-8")
+            ) is not None:
+                key = shader["shader_key"]
+                if key.startswith("0x"):
+                    key = key[2:]
+                shader["semantic_execution"] = main_character_execution(
+                    shader, (dxbc_root / f"{key.lower()}.dxbc").read_bytes()
+                )
             if shader["selector"] not in validated_selectors:
                 continue
             expanded_installed = resolve_local_includes(

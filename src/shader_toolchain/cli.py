@@ -11,6 +11,24 @@ from .build import build_cache
 from .compare import compare_caches
 from .gpu_fuzz import fuzz_semantic_shader
 from .materialize import materialize_semantic_variant, semantic_records
+from .main_part_permutation_graph import (
+    build_main_part_permutation_graph,
+    summarize_main_part_permutation_graph,
+)
+from .main_part_family_miner import (
+    mine_main_part_families,
+    summarize_mined_families,
+)
+from .main_part_synthesis import (
+    build_synthesis_readiness_report,
+    summarize_synthesis_readiness,
+    write_synthesis_specifications,
+)
+from .main_part_synthesis_emitter import (
+    emit_corpus_family,
+    install_validated_family,
+    validate_emitted_family,
+)
 from .reconstruct import ToolchainError, reconstruct, verify_output
 from .sbc import FormatError
 
@@ -111,6 +129,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip corpus verification when a trusted parent process already ran it",
     )
     fuzz_parser.add_argument("--report", type=Path)
+    graph_parser = commands.add_parser(
+        "main-part-graph",
+        help="inventory main_part pixel shaders as composable semantic phases",
+    )
+    graph_parser.add_argument("corpus", type=Path)
+    graph_parser.add_argument("--output", type=Path)
+    graph_parser.add_argument("--summary-only", action="store_true")
+    families_parser = commands.add_parser(
+        "main-part-families",
+        help="mine and rank selector-independent main_part graph families",
+    )
+    families_parser.add_argument("corpus", type=Path)
+    families_parser.add_argument("--output", type=Path)
+    families_parser.add_argument("--limit", type=int, default=25)
+    families_parser.add_argument("--minimum-members", type=int, default=2)
+    synthesis_parser = commands.add_parser(
+        "main-part-synthesis",
+        help="induce typed family templates and policy holes from main_part",
+    )
+    synthesis_parser.add_argument("corpus", type=Path)
+    synthesis_parser.add_argument("--output", type=Path)
+    synthesis_parser.add_argument("--limit", type=int, default=25)
+    synthesis_parser.add_argument("--minimum-members", type=int, default=2)
+    synthesis_parser.add_argument(
+        "--spec-dir", type=Path,
+        help="write semantic-named graph specifications for ready families",
+    )
+    emit_parser = commands.add_parser(
+        "main-part-synthesis-emit",
+        help="emit and validate one synthesized main_part family",
+    )
+    emit_parser.add_argument("corpus", type=Path)
+    emit_parser.add_argument("--family", required=True)
+    emit_parser.add_argument("--apply", action="store_true")
+    emit_parser.add_argument(
+        "--gpu-cases", type=int, default=64,
+        help="GPU differential cases per member when applying (default: 64)",
+    )
+    emit_parser.add_argument("--output", type=Path)
     return parser
 
 
@@ -201,6 +258,81 @@ def main() -> int:
                 args.report.write_text(rendered, encoding="utf-8", newline="\n")
             print(rendered, end="")
             return 0 if report["comparison"]["passed"] else 2
+        if args.command == "main-part-graph":
+            report = build_main_part_permutation_graph(args.corpus)
+            if args.summary_only:
+                report = summarize_main_part_permutation_graph(report)
+            rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(rendered, encoding="utf-8", newline="\n")
+            print(rendered, end="")
+            return 0
+        if args.command == "main-part-families":
+            report = mine_main_part_families(
+                args.corpus, minimum_members=args.minimum_members
+            )
+            report = summarize_mined_families(report, limit=args.limit)
+            rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(rendered, encoding="utf-8", newline="\n")
+            print(rendered, end="")
+            return 0
+        if args.command == "main-part-synthesis":
+            report = build_synthesis_readiness_report(
+                args.corpus, minimum_members=args.minimum_members
+            )
+            if args.spec_dir:
+                report["campaign"] = write_synthesis_specifications(
+                    report, args.spec_dir
+                )
+            report = summarize_synthesis_readiness(
+                report, limit=args.limit
+            )
+            rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(
+                    rendered, encoding="utf-8", newline="\n"
+                )
+            print(rendered, end="")
+            return 0
+        if args.command == "main-part-synthesis-emit":
+            emitted = emit_corpus_family(args.corpus, args.family)
+            validated = validate_emitted_family(args.corpus, emitted)
+            if args.apply:
+                if args.gpu_cases < 1:
+                    raise ValueError(
+                        "--apply requires at least one GPU differential case"
+                    )
+                report = install_validated_family(
+                    args.corpus, validated, gpu_cases=args.gpu_cases
+                )
+                report["applied"] = True
+            else:
+                report = {
+                    "applied": False,
+                    "family": emitted.family,
+                    "asset": emitted.asset_filename,
+                    "selector_count": len(validated.selectors),
+                    "selectors": list(validated.selectors),
+                    "common_token_ratio": emitted.common_token_ratio,
+                    "common_region_count": emitted.common_region_count,
+                    "policy_region_count": emitted.policy_region_count,
+                    "assembly_exact_count": validated.assembly_exact_count,
+                    "opcode_sequence_exact_count": (
+                        validated.opcode_sequence_exact_count
+                    ),
+                }
+            rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(
+                    rendered, encoding="utf-8", newline="\n"
+                )
+            print(rendered, end="")
+            return 0
     except (OSError, FormatError, RuntimeError, ToolchainError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

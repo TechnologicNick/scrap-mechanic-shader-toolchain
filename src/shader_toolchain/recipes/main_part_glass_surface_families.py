@@ -37,6 +37,7 @@ class MainPartGlassSurfaceFamily:
     transmission: bool
     tangent_frame: bool
     cutoff_transfer: bool
+    light_cap: bool = False
 
     @property
     def name(self) -> str:
@@ -45,9 +46,16 @@ class MainPartGlassSurfaceFamily:
             else f"dissolve_uv{self.dissolve_uv}"
         )
         cutout = "" if self.alpha_cutoff else "_no_cutout"
+        material = (
+            "_light_cap" if self.light_cap
+            else "_geometric" if not self.normal_map
+            else ""
+        )
+        response = "" if self.responsive_glow else "_unresponsive"
+        lighting = "" if self.transmission else "_standard"
         return (
             f"glass_surface_{self.quality}_{self.reflection}_{dissolve}"
-            f"{cutout}"
+            f"{cutout}{material}{response}{lighting}"
         )
 
     @property
@@ -74,6 +82,8 @@ class MainPartGlassSurfaceFamily:
             values.add("TRANSFER_TANGENTS")
         if self.cutoff_transfer:
             values.add("TRANSFER_CUTOFF")
+        if self.light_cap:
+            values.add("PS_LIGHT_CAP")
         return frozenset(values)
 
 
@@ -240,6 +250,80 @@ MEDIUM_SINGLE_NO_CUTOUT = MainPartGlassSurfaceFamily(
     tangent_frame=True, cutoff_transfer=False,
 )
 
+MEDIUM_MULTI_LIGHT_CAP = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="multi", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=True, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+MEDIUM_SINGLE_LIGHT_CAP = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="single", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=True, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+MEDIUM_OFF_LIGHT_CAP = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="off", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=True, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+MEDIUM_MULTI_LIGHT_CAP_UNRESPONSIVE = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="multi", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+MEDIUM_SINGLE_LIGHT_CAP_UNRESPONSIVE = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="single", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+MEDIUM_OFF_LIGHT_CAP_UNRESPONSIVE = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="off", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=True, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=True,
+    tangent_frame=True, cutoff_transfer=False, light_cap=True,
+)
+
+MEDIUM_MULTI_STANDARD = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="multi", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=False,
+    tangent_frame=True, cutoff_transfer=False,
+)
+MEDIUM_SINGLE_STANDARD = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="single", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=False,
+    tangent_frame=True, cutoff_transfer=False,
+)
+MEDIUM_OFF_STANDARD = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="off", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=True, responsive_glow=False, transmission=False,
+    tangent_frame=True, cutoff_transfer=False,
+)
+MEDIUM_MULTI_STANDARD_GEOMETRIC = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="multi", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=False, responsive_glow=False, transmission=False,
+    tangent_frame=False, cutoff_transfer=False,
+)
+MEDIUM_SINGLE_STANDARD_GEOMETRIC = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="single", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=False, responsive_glow=False, transmission=False,
+    tangent_frame=False, cutoff_transfer=False,
+)
+MEDIUM_OFF_STANDARD_GEOMETRIC = MainPartGlassSurfaceFamily(
+    quality="medium", reflection="off", dissolve_uv=None,
+    alpha_cutoff=True, depth_blur=False, flip_backface_normals=True,
+    normal_map=False, responsive_glow=False, transmission=False,
+    tangent_frame=False, cutoff_transfer=False,
+)
+
 GLASS_SURFACE_FAMILIES = (
     MEDIUM_MULTI_DISSOLVE,
     LOW_MULTI_DISSOLVE,
@@ -259,6 +343,18 @@ GLASS_SURFACE_FAMILIES = (
     MEDIUM_MULTI_NO_CUTOUT,
     MEDIUM_OFF_NO_CUTOUT,
     MEDIUM_SINGLE_NO_CUTOUT,
+    MEDIUM_MULTI_LIGHT_CAP,
+    MEDIUM_SINGLE_LIGHT_CAP,
+    MEDIUM_OFF_LIGHT_CAP,
+    MEDIUM_MULTI_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_SINGLE_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_OFF_LIGHT_CAP_UNRESPONSIVE,
+    MEDIUM_MULTI_STANDARD,
+    MEDIUM_SINGLE_STANDARD,
+    MEDIUM_OFF_STANDARD,
+    MEDIUM_MULTI_STANDARD_GEOMETRIC,
+    MEDIUM_SINGLE_STANDARD_GEOMETRIC,
+    MEDIUM_OFF_STANDARD_GEOMETRIC,
 )
 
 
@@ -283,8 +379,6 @@ def classify_main_part_glass_surface_family(
         SemanticKey("VIEW_POSITION", 0),
         SemanticKey("UV", 0),
         SemanticKey("NORMAL", 0),
-        SemanticKey("TANGENT", 0),
-        SemanticKey("BITANGENT", 0),
         SemanticKey("VERTEXCOLOR", 0),
         SemanticKey("SCREEN_UV", 0),
         SemanticKey("FOG_COLOR", 0),
@@ -292,6 +386,11 @@ def classify_main_part_glass_surface_family(
         SemanticKey("SV_TARGET", 0),
         SemanticKey("SV_TARGET", 1),
     }
+    if family.tangent_frame:
+        required.update((
+            SemanticKey("TANGENT", 0),
+            SemanticKey("BITANGENT", 0),
+        ))
     if family.cutoff_transfer:
         required.add(SemanticKey("CUTOFF", 0))
     return family if required <= semantics else None
@@ -337,8 +436,6 @@ def lift_main_part_glass_surface_family(
         SemanticKey("VIEW_POSITION", 0),
         SemanticKey("UV", 0),
         SemanticKey("NORMAL", 0),
-        SemanticKey("TANGENT", 0),
-        SemanticKey("BITANGENT", 0),
         SemanticKey("VERTEXCOLOR", 0),
         SemanticKey("SCREEN_UV", 0),
         SemanticKey("FOG_COLOR", 0),
@@ -351,6 +448,13 @@ def lift_main_part_glass_surface_family(
         SemanticKey("SV_TARGET", 1),
     ))
     argument_values = [variables[key] for key in argument_semantics]
+    if family.tangent_frame:
+        argument_values[4:4] = [
+            variables[SemanticKey("TANGENT", 0)],
+            variables[SemanticKey("BITANGENT", 0)],
+        ]
+    else:
+        argument_values[4:4] = ["float3(0.0, 0.0, 0.0)"] * 2
     if family.quality == "medium" and not family.cutoff_transfer:
         # The shared medium backend keeps a stable call ABI; the cutoff value
         # is compile-time dead when the plain material frontend is selected.
@@ -383,17 +487,39 @@ def lift_main_part_glass_surface_family(
         )
     elif family.quality == "medium":
         evaluator = "EvaluateMainPartGlassSurfaceMedium"
-        suffix = (
-            "_dissolve" if family.dissolve_uv is not None else ""
-        )
-        reflection_suffix = (
-            "" if family.reflection == "multi"
-            else f"_{family.reflection}"
-        )
-        asset = (
-            "main_part_glass_surface_medium"
-            f"{reflection_suffix}{suffix}.hlsl"
-        )
+        if not family.transmission:
+            reflection_suffix = (
+                "" if family.reflection == "multi"
+                else f"_{family.reflection}"
+            )
+            asset = (
+                "main_part_glass_surface_medium"
+                f"{reflection_suffix}_standard"
+                f"{'_geometric' if not family.normal_map else ''}.hlsl"
+            )
+        elif family.light_cap:
+            reflection_suffix = (
+                "" if family.reflection == "multi"
+                else f"_{family.reflection}"
+            )
+            asset = (
+                "main_part_glass_surface_medium_light_cap"
+                f"{reflection_suffix}"
+                f"{'_unresponsive' if not family.responsive_glow else ''}"
+                ".hlsl"
+            )
+        else:
+            suffix = (
+                "_dissolve" if family.dissolve_uv is not None else ""
+            )
+            reflection_suffix = (
+                "" if family.reflection == "multi"
+                else f"_{family.reflection}"
+            )
+            asset = (
+                "main_part_glass_surface_medium"
+                f"{reflection_suffix}{suffix}.hlsl"
+            )
     elif family.reflection == "single":
         evaluator = "EvaluateMainPartGlassSurfaceLowSingle"
         asset = (

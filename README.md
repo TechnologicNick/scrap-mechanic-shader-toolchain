@@ -183,6 +183,28 @@ file includes the recovered compile definitions, resolved local includes,
 stage, and entry point, so it can be read and compiled without the aggregate
 module around it.
 
+Inventory every `main_part` pixel permutation as a selector-independent phase
+graph and rank the remaining reusable work:
+
+```powershell
+uv run sm-shaders main-part-graph output --summary-only
+uv run sm-shaders main-part-graph output `
+  --output output\reports\main-part-permutation-graph.json
+uv run sm-shaders main-part-families output `
+  --output output\reports\main-part-family-candidates.json
+uv run sm-shaders main-part-synthesis output `
+  --output output\reports\main-part-synthesis.json `
+  --spec-dir output\reports\main-part-synthesis-specs
+uv run sm-shaders main-part-synthesis-emit output `
+  --family transparent_surface_water_tangent_map_dissolve_uv0_fog_cutoff
+# Add --apply only after reviewing the dry-run report. Applying requires and
+# transactionally runs GPU differential validation for every family member.
+```
+
+See [the permutation graph workflow](docs/MAIN-PART-PERMUTATION-GRAPH.md) for
+the canonical IR, typed phase contracts, family mining, generated graph
+specifications, and migration gates.
+
 Semantic recipes are not accepted merely because they compile. Reconstruction
 compiles each generated implementation and reflects it against the recovered
 DXBC. Signatures, texture and sampler slots, constant-buffer layout, and shader

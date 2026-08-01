@@ -2584,6 +2584,48 @@ def apply_main_part_recipe(
     ensure_asset_include(staging, "main_part_tinted_glass_surface_dissolve_multi.hlsl")
     ensure_asset_include(staging, "main_part_tinted_glass_surface_dissolve_off.hlsl")
     ensure_asset_include(staging, "main_part_tinted_glass_surface_dissolve_single.hlsl")
+    ensure_asset_include(staging, "main_part_glass_surface_shared.hlsl")
+    ensure_asset_include(staging, "main_part_directional_glass_surface.hlsl")
+    ensure_asset_include(
+        staging, "main_part_tinted_dissolve_glass_surface.hlsl"
+    )
+    ensure_asset_include(staging, "main_part_directional_map.hlsl")
+    ensure_asset_include(staging, "main_part_glass_clustered_lighting.hlsl")
+    ensure_asset_include(staging, "main_part_light_cap.hlsl")
+    ensure_asset_include(staging, "main_part_glass_surface_medium_light_cap.hlsl")
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_light_cap_single.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_light_cap_off.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_light_cap_unresponsive.hlsl"
+    )
+    ensure_asset_include(
+        staging,
+        "main_part_glass_surface_medium_light_cap_single_unresponsive.hlsl",
+    )
+    ensure_asset_include(
+        staging,
+        "main_part_glass_surface_medium_light_cap_off_unresponsive.hlsl",
+    )
+    ensure_asset_include(staging, "main_part_glass_surface_medium_standard.hlsl")
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_single_standard.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_off_standard.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_standard_geometric.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_single_standard_geometric.hlsl"
+    )
+    ensure_asset_include(
+        staging, "main_part_glass_surface_medium_off_standard_geometric.hlsl"
+    )
     ensure_asset_include(staging, "main_part_standard_glass_surface_unresponsive_multi.hlsl")
     ensure_asset_include(staging, "main_part_standard_glass_surface_unresponsive_off.hlsl")
     ensure_asset_include(staging, "main_part_standard_glass_surface_unresponsive_single.hlsl")

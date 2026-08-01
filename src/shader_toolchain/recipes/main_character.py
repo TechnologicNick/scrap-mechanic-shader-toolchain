@@ -76,17 +76,29 @@ REGISTER_NAMES_BY_MODULE = {
 }
 
 
-def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
+def main_character_execution(
+    shader: dict[str, Any], blob: bytes,
+) -> dict[str, Any]:
     abi = ShaderReflector().abi(blob)
     resources = abi["resources"]
     textures = [resource for resource in resources if resource["type"] == 2]
     samplers = [resource for resource in resources if resource["type"] == 3]
     buffers = [resource for resource in resources if resource["type"] == 5]
     defines = set(shader["defines"])
+    clustered_transparent = (
+        bool({"PS_SHADER_QUALITY_MEDIUM", "PS_SHADER_QUALITY_HIGH"} & defines)
+        and "PS_PERM_TRANSPARANT_SURFACE" in defines
+    )
     profiles = {
         0: "random", 1: "random", 2: "random", 5: "projection",
-        6: "random" if "PS_PERM_VISUALIZATION" in defines else "cluster",
-        8: "index", 11: "index", 12: "index", 13: "random",
+        6: (
+            "random" if "PS_PERM_VISUALIZATION" in defines
+            else "main-light-cluster" if clustered_transparent
+            else "cluster"
+        ),
+        8: "main-light-lights" if clustered_transparent else "index",
+        11: "reflection" if clustered_transparent else "index",
+        12: "index", 13: "random",
     }
     outputs = sorted(abi["outputs"], key=lambda output: output["index"])
     depth = "PS_PERM_DEPTH" in defines
@@ -103,7 +115,8 @@ def _execution(shader: dict[str, Any], blob: bytes) -> dict[str, Any]:
         "smooth_texture_slots": [resource["bind_point"] for resource in textures],
         "structured_inputs": [
             {"slot": resource["bind_point"], "elements": 4096,
-             "stride": 4, "profile": "zero"}
+             "stride": 4,
+             "profile": "main-light" if clustered_transparent else "zero"}
             for resource in buffers
         ],
         "samplers": [
@@ -314,7 +327,9 @@ def apply_character_material_recipe(
             for shader in shaders
         }
     executions = {
-        shader["selector"]: _execution(shader, blobs[shader["bundle_index"]])
+        shader["selector"]: main_character_execution(
+            shader, blobs[shader["bundle_index"]]
+        )
         for shader in shaders if shader["stage"] == "pixel"
     }
     return emit_validated_module(
