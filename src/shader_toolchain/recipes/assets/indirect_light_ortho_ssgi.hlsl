@@ -108,7 +108,8 @@ float3 LoadIndirectLightOrthoAoViewPosition(
   uint2 pixel = min((uint2)(cb_settings.vInvRenderScale
       * clampedUv * (float2)aoSize), aoSize - 1u);
   float2 unscaledUv = ((float2)pixel + 0.5) / (float2)aoSize;
-  float depth = DecodeIndirectLightDepth(tAoDepth.Load(uint3(pixel, 0)));
+  float depth = DecodeIndirectLightDepth(tAoDepth.SampleLevel(
+      LinearClampClamp_s, clampedUv, 0.0));
   float2 clip = unscaledUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
   float2 viewCorner = cb_vNearFarViewCorner.zw * clip + cb_vViewTranslate;
   return float3(viewCorner.y, -depth, viewCorner.x);

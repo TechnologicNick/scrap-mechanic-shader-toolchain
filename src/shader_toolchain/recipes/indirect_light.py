@@ -73,6 +73,29 @@ def _lift_indirect_light_abi(source: str) -> str:
     return source
 
 
+def _append_runtime_abi_sentinel(
+    source: str, sentinel: list[str], buffer_slots: set[int]
+) -> str:
+    """Keep reflected bindings alive after a semantic main replacement."""
+    if not sentinel:
+        return source
+    insertion = source.rfind("\n}")
+    if insertion < 0:
+        raise RuntimeError("indirect-light semantic main has no closing brace")
+    guard = (
+        "cb_vNearFarViewCorner.x == -3.402823e+38"
+        if 5 in buffer_slots
+        else "w1.x == -3.402823e+38"
+    )
+    return (
+        source[:insertion]
+        + f"\n  if ({guard}) {{\n    "
+        + "\n    ".join(sentinel)
+        + "\n  }"
+        + source[insertion:]
+    )
+
+
 def _is_probe_cascade_reference(defines: list[str]) -> bool:
     return set(defines) == {
         "PIXEL_SHADER",
@@ -2239,11 +2262,20 @@ def apply_indirect_light_recipe(
             )
         }
         sentinel = []
+        buffer_slots = {
+            resource["bind_point"]
+            for resource in resources
+            if resource["type"] == 0
+        }
         for resource in resources:
             slot = resource["bind_point"]
             if resource["type"] == 2 and slot in texture_declarations:
                 name, is_array = texture_declarations[slot]
-                coordinate = "int4(0, 0, 0, 0)" if is_array else "int3(0, 0, 0)"
+                coordinate = (
+                    "int4((int2)w1.xy, 0, 0)"
+                    if is_array
+                    else "int3((int2)w1.xy, 0)"
+                )
                 sentinel.append(f"o0.x += {name}.Load({coordinate}).x;")
             elif resource["type"] == 5:
                 sentinel.append("o0.x += (float)sbVoxelLightIds[0];")
@@ -2258,20 +2290,8 @@ def apply_indirect_light_recipe(
                         f"o0.x += {texture_name}.Sample("
                         f"{sampler_declarations[slot]}, {coordinate}).x;"
                     )
-        if sentinel:
-            insertion = source.rfind("  return;")
-            sanitize = (
-                "  if ((asuint(o0.w) & 0x7f800000u) == 0x7f800000u) "
-                "o0.w = 1.0;\n"
-            )
-            source = (
-                source[:insertion]
-                + sanitize
-                + "  if (cb_vNearFarViewCorner.x == -3.402823e+38) {\n    "
-                + "\n    ".join(sentinel)
-                + "\n  }\n"
-                + source[insertion:]
-            )
+        if 0 in buffer_slots and "cb_settings" in source:
+            sentinel.append("o0.x += cb_settings.vStart.x;")
         source = rename_register_state(
             source, REGISTER_NAMES,
             note="Probe, ray, and subsurface accumulation retain DXBC order.",
@@ -2432,6 +2452,9 @@ def apply_indirect_light_recipe(
             source = _lift_perspective_cascade_ssgi_reference(
                 source, *perspective_cascade_ssgi
             )
+        source = _append_runtime_abi_sentinel(
+            source, sentinel, buffer_slots
+        )
         variants[selector] = source
     bodies = _emit_variant_snippets(staging, variants)
     return emit_validated_module(

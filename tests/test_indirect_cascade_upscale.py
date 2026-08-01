@@ -580,6 +580,7 @@ def test_cascade_payload_no_history_composes_optional_outputs() -> None:
 // int2(-2,-2) int2(2,2)
 // LinearizeUpscaleDepth(tDepth.Load(
 // tIndirect_Ao.SampleLevel(
+// tTemporalAo.SampleLevel(
 // tTemporalIndirect.SampleLevel(
 // tSSS.SampleLevel(
 // tTemporalSSS.SampleLevel(
@@ -606,9 +607,11 @@ void mainPS()
         sss=True,
     )
     assert "EvaluateBoundMediumDepthCascadeOnlyLighting" in lifted
+    assert "GatherBoundOrthoAoIndirectSurface" in lifted
+    assert "ResolveBoundAoIndirectTemporal" in lifted
     assert "ResolveBoundIndirectTemporal" in lifted
     assert "ResolveBoundSssTemporal" in lifted
-    assert "min(resolvedSss.x, visibility)" in lifted
+    assert "float2(resolvedAo.x, min(resolvedSss.x, visibility))" in lifted
     assert "registerState" not in lifted
 
 

@@ -1,6 +1,8 @@
 from pathlib import Path
 
+from shader_toolchain.recipes.common import asset
 from shader_toolchain.recipes.indirect_light import (
+    _append_runtime_abi_sentinel,
     _emit_variant_snippets,
     _is_cascade_medium_reference,
     _is_medium_sss_reference,
@@ -85,6 +87,18 @@ void mainPS() {}
     assert "indirect_light_reflections_abi.hlsl" in lifted
     assert "indirect_light_cluster_abi.hlsl" in lifted
     assert "indirect_light_ao_settings_abi.hlsl" in lifted
+
+
+def test_runtime_abi_sentinel_is_appended_to_replaced_main() -> None:
+    source = "void mainPS(float2 w1 : UV0, out float4 o0 : SV_Target0)\n{\n}\n"
+    lifted = _append_runtime_abi_sentinel(
+        source,
+        ["o0.x += tDepth.Load(int3((int2)w1.xy, 0));"],
+        {5},
+    )
+    assert "cb_vNearFarViewCorner.x == -3.402823e+38" in lifted
+    assert "tDepth.Load(int3((int2)w1.xy, 0))" in lifted
+    assert lifted.rstrip().endswith("}")
 
 
 def test_probe_cascade_reference_lift_is_typed_entry_point() -> None:
@@ -471,6 +485,22 @@ def test_perspective_ao_sss_policy_covers_quality_count_matrix() -> None:
         "PIXEL_SHADER", "PS_REFLECTION", "PS_SSAO_QUALITY_HIGH",
         "PS_SSS_COUNT=0",
     ]) is None
+
+
+def test_indirect_light_helpers_keep_recovered_sampling_paths() -> None:
+    perspective = asset("indirect_light_ao_sss.hlsl")
+    ortho = asset("indirect_light_ortho_ssgi.hlsl")
+    shared = asset("indirect_light_probe_cascade.hlsl")
+    assert "tMaterial.Gather(" in perspective
+    assert "PointClampClamp_s" in perspective
+    assert "tScreenNoise.Load(" in perspective
+    assert "tAoDepth.SampleLevel(" in perspective
+    assert "LinearClampClamp_s, clampedUv" in perspective
+    assert "tAoDepth.SampleLevel(" in ortho
+    assert "LinearClampClamp_s, clampedUv" in ortho
+    assert "tScreenNoise.Load(" in shared
+    assert "stepUv * (0.5 + rayJitter)" in shared
+    assert "tAoDepth.SampleLevel(" in shared
 
 
 def test_perspective_ao_sss_lift_routes_optional_target() -> None:

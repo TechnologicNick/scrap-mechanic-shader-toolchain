@@ -1835,6 +1835,7 @@ def _lift_bound_cascade_payload_no_history_main(
         required.extend(
             (
                 "tIndirect_Ao.SampleLevel(",
+                "tTemporalAo.SampleLevel(",
                 "tTemporalIndirect.SampleLevel(",
                 "out float3 o1 : SV_Target1",
             )
@@ -1900,16 +1901,29 @@ def _lift_bound_cascade_payload_no_history_main(
     outputs = []
     if indirect:
         includes.append(
-            '#include "../indirect_cascade_upscale_indirect_bound.hlsl"'
+            '#include "../indirect_cascade_upscale_ao_indirect_bound.hlsl"'
         )
         signature.append("  out float3 o1 : SV_Target1")
         background.append("    o1 = float3(0.0, 0.0, 0.0);")
+        ao_indirect_gather = (
+            "GatherBoundPerspectiveAoIndirectSurface"
+            if perspective
+            else "GatherBoundOrthoAoIndirectSurface"
+        )
+        auxiliary_response = (
+            "0.649999976" if quality == "high" else "0.819999993"
+        )
         payload.append(
-            """  UpscaledIndirect indirectLighting =
-      FilterBoundIndirectCross(pixel, viewDepth);
+            """  UpscaleAoIndirectSurface aoIndirectSurface =
+      __AO_INDIRECT_GATHER__(w1, pixel, viewDepth);
+  float2 resolvedAo = ResolveBoundAoIndirectTemporal(
+      v1, aoIndirectSurface, __AUXILIARY_RESPONSE__);
   float3 resolvedIndirect = ResolveBoundIndirectTemporal(
-      v1, viewDepth, surface.worldPosition, indirectLighting);
+      v1, viewDepth, aoIndirectSurface.worldPosition,
+      aoIndirectSurface.indirect);
 """
+            .replace("__AO_INDIRECT_GATHER__", ao_indirect_gather)
+            .replace("__AUXILIARY_RESPONSE__", auxiliary_response)
         )
         outputs.append("  o1 = resolvedIndirect;")
     if sss:
@@ -1930,9 +1944,19 @@ def _lift_bound_cascade_payload_no_history_main(
 """
         )
         outputs.append("  o2 = resolvedSss;")
-        outputs.insert(0, "  o0 = float2(1.0, min(resolvedSss.x, visibility));")
+        outputs.insert(
+            0,
+            "  o0 = float2("
+            + ("resolvedAo.x" if indirect else "1.0")
+            + ", min(resolvedSss.x, visibility));",
+        )
     else:
-        outputs.insert(0, "  o0 = float2(1.0, visibility);")
+        outputs.insert(
+            0,
+            "  o0 = float2("
+            + ("resolvedAo.x" if indirect else "1.0")
+            + ", visibility);",
+        )
 
     replacement = """__INCLUDES__
 

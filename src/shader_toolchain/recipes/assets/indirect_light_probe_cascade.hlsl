@@ -499,7 +499,8 @@ float3 LoadIndirectLightAoViewPosition(float2 scaledUv, uint2 aoSize)
   float2 clampedUv = saturate(scaledUv);
   uint2 pixel = min((uint2)(clampedUv * (float2)aoSize), aoSize - 1u);
   float2 pixelUv = (float2)pixel / (float2)aoSize;
-  float depth = DecodeIndirectLightDepth(tAoDepth.Load(uint3(pixel, 0)));
+  float depth = DecodeIndirectLightDepth(tAoDepth.SampleLevel(
+      LinearClampClamp_s, clampedUv, 0.0));
   float2 clip = pixelUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
   return float3(cb_vNearFarViewCorner.zw * clip * depth, -depth);
 }
@@ -609,7 +610,11 @@ float TraceIndirectLightSubsurface(
   float2 stepUv = normalize(projectedDelta) * stepDistance
       * length(projectedDelta) / max(1.0e-4, surface.depth * surface.depth);
   float depthStep = -direction.z * stepDistance;
-  float2 rayUv = surface.scaledUv + stepUv;
+  uint2 noisePixel = (uint2)(cb_vTargetSize * surface.scaledUv) & 63u;
+  float rayJitter = abs(frac(
+      cb_fTime * 0.1
+      + tScreenNoise.Load(uint3(noisePixel, 0))) - 0.5) * 2.0;
+  float2 rayUv = surface.scaledUv + stepUv * (0.5 + rayJitter);
   float expectedDepth = surface.depth + depthStep;
   float occlusion = 0.0;
   [unroll]
